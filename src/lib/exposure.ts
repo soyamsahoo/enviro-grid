@@ -24,6 +24,19 @@ export const VENTILATION_RATES: Record<
   farmer: { label: "Field work", m3perMin: 0.025 },
 };
 
+/**
+ * Real-time activity toggle for the dual-route demo. Minute ventilation
+ * (V̇e) in litres/min as published for steady-state exercise, e.g.
+ * ACSM/WHO reference values: running 45 L/min, cycling 30 L/min,
+ * walking 12 L/min. Converted internally to m³/min (÷ 1000).
+ */
+export const ACTIVITY_LEVELS = {
+  runner: { label: "Runner", lperMin: 45 },
+  cyclist: { label: "Cyclist", lperMin: 30 },
+  walker: { label: "Walker", lperMin: 12 },
+} as const;
+export type ActivityId = keyof typeof ACTIVITY_LEVELS;
+
 export const ACTIVITY_MINUTES = [5, 15, 30, 60] as const;
 export type ActivityMinutes = (typeof ACTIVITY_MINUTES)[number];
 
@@ -67,6 +80,17 @@ export interface RouteComparison {
   cleanFactor: number;
 }
 
+export interface RouteComputeOpts {
+  /** Real-time activity override (V̇e from ACTIVITY_LEVELS, L/min). */
+  activityId?: ActivityId;
+  /** Override the street PM2.5 concentration (e.g. live route average). */
+  streetPm25?: number | null;
+  /** Override Route A duration (e.g. live OSRM duration). */
+  minutesA?: number;
+  /** Clean-corridor factor (default 0.18 → ~82% less exposure). */
+  cleanFactor?: number;
+}
+
 /**
  * Dual-route comparison for the hero drawer.
  *
@@ -75,17 +99,26 @@ export interface RouteComparison {
  *  - Route B "cleanest" detours through green corridors/parks where the
  *    air-quality model estimates cleanFactor × street PM2.5 (default 0.18,
  *    i.e. ~82% less exposure) but costs +3 minutes.
+ *
+ * Every input (activity, minutes, street PM2.5) flows through the dose
+ * equation, so toggles and route drags recompute cigarettes live.
  */
 export function computeRoutes(
   payload: AggregatePayload | null,
   personaId: PersonaId,
   activityMinutes: number,
-  cleanFactor = 0.18,
+  opts: RouteComputeOpts = {},
 ): RouteComparison | null {
-  const streetPm = payload?.air_quality.pm25 ?? null;
-  if (streetPm === null || !Number.isFinite(streetPm)) return null;
+  const streetPm = opts.streetPm25 ?? payload?.air_quality.pm25 ?? null;
+  if (streetPm === null || !Number.isFinite(streetPm) || streetPm < 0) return null;
 
-  const vent = VENTILATION_RATES[personaId];
+  const activity = opts.activityId ? ACTIVITY_LEVELS[opts.activityId] : null;
+  const vent = activity
+    ? { label: activity.label, m3perMin: activity.lperMin / 1000 }
+    : VENTILATION_RATES[personaId];
+  const minutesA = opts.minutesA ?? activityMinutes;
+  const cleanFactor = opts.cleanFactor ?? 0.18;
+
   const cleanPm = Math.max(1, Math.round(streetPm * cleanFactor));
   const extraMinutes = 3;
 
@@ -110,12 +143,12 @@ export function computeRoutes(
     };
   };
 
-  const routeA = build("fastest", "Fastest route", activityMinutes, streetPm, "#F43F5E", {
+  const routeA = build("fastest", "Fastest route", minutesA, streetPm, "#F43F5E", {
     chip: "border-rose-500/40 bg-rose-500/10 text-rose-300",
     bar: "from-rose-500 to-red-600",
     text: "text-rose-300",
   });
-  const routeB = build("cleanest", "Cleanest route", activityMinutes + extraMinutes, cleanPm, "#10B981", {
+  const routeB = build("cleanest", "Cleanest route", minutesA + extraMinutes, cleanPm, "#10B981", {
     chip: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
     bar: "from-emerald-400 to-teal-500",
     text: "text-emerald-300",

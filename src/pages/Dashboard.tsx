@@ -16,6 +16,8 @@ import type { PersonaId } from "@/lib/ai/personas";
 import type { AggregatePayload, AlertRule, SearchLocation } from "@/lib/types";
 import { generatePersonaScore } from "@/lib/ai/copilot";
 import { aggregateEnvironment, recordSearch } from "@/lib/services/apiAggregator";
+import { fetchAqiGrid } from "@/lib/services/openaq";
+import { avgPm25AlongRoute, fetchRoute, type LatLng, type RouteResult } from "@/lib/routing";
 import { isSupabaseConfigured, checkSupabaseTables } from "@/lib/services/supabase";
 import { reverseGeocode } from "@/components/dashboard/LocationSearch";
 import { timeAgo } from "@/lib/utils";
@@ -98,6 +100,54 @@ export default function Dashboard() {
     },
     enabled: Boolean(payload),
   });
+
+  // --------------------------------------------------- live route + AQI grid
+  const gridQuery = useQuery({
+    queryKey: ["aqiGrid", location.lat.toFixed(4), location.lon.toFixed(4)],
+    queryFn: () => fetchAqiGrid(location.lat, location.lon),
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const [origin, setOrigin] = useState<LatLng>(() => ({
+    lat: location.lat,
+    lon: location.lon - 0.012,
+  }));
+  const [destination, setDestination] = useState<LatLng>(() => ({
+    lat: location.lat + 0.006,
+    lon: location.lon + 0.012,
+  }));
+
+  // Reset pins when the user searches a new place.
+  useEffect(() => {
+    setOrigin({ lat: location.lat, lon: location.lon - 0.012 });
+    setDestination({ lat: location.lat + 0.006, lon: location.lon + 0.012 });
+  }, [location.lat, location.lon]);
+
+  const [route, setRoute] = useState<RouteResult | null>(null);
+  const [routeLoading, setRouteLoading] = useState(false);
+
+  // Debounced reroute: dragging a pin (or new grid data) re-integrates the
+  // edge-weight toxicity formula on the fly.
+  useEffect(() => {
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      setRouteLoading(true);
+      try {
+        const res = await fetchRoute(origin, destination);
+        if (cancelled) return;
+        const avgPm25 = avgPm25AlongRoute(res.coords, gridQuery.data ?? []);
+        setRoute({ ...res, avgPm25 });
+      } catch {
+        if (!cancelled) setRoute((r) => (r ? { ...r, avgPm25: null } : null));
+      } finally {
+        if (!cancelled) setRouteLoading(false);
+      }
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [origin, destination, gridQuery.data]);
 
   const useCurrentLocation = useCallback(() => {
     if (!navigator.geolocation) return;
@@ -353,6 +403,14 @@ export default function Dashboard() {
               payload={payload}
               center={{ lat: location.lat, lon: location.lon }}
               className="h-[520px]"
+              grid={gridQuery.data ?? []}
+              origin={origin}
+              destination={destination}
+              onOriginChange={setOrigin}
+              onDestinationChange={setDestination}
+              routeCoords={route?.coords}
+              routeMeta={route}
+              routeLoading={routeLoading}
             />
             <DeltaBadges payload={payload ?? emptyPayload()} />
           </div>
@@ -435,6 +493,8 @@ export default function Dashboard() {
         persona={persona}
         open={routesOpen}
         onClose={() => setRoutesOpen(false)}
+        routeMeta={route}
+        routeLoading={routeLoading}
       />
       <CopilotChat payload={payload} persona={persona} />
     </div>

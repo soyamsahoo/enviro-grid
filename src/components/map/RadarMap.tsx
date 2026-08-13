@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Route } from "lucide-react";
 import maplibregl, { type Map as MapLibreMap, type GeoJSONSource } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { cn } from "@/lib/utils";
+import { cn, formatNumber } from "@/lib/utils";
 import type { AggregatePayload, SpeciesObservation } from "@/lib/types";
-import { fetchStationsWithLatest, fetchAqiGrid, aqiColor } from "@/lib/services/openaq";
+import { fetchStationsWithLatest, aqiColor } from "@/lib/services/openaq";
 import { fetchJson } from "@/lib/services/http";
+import type { LatLng, RouteResult } from "@/lib/routing";
 
 interface StationPoint {
   lat: number;
@@ -47,14 +49,32 @@ export default function RadarMap({
   payload,
   center,
   className,
+  grid,
+  origin,
+  destination,
+  onOriginChange,
+  onDestinationChange,
+  routeCoords,
+  routeMeta,
+  routeLoading,
 }: {
   payload: AggregatePayload | null;
   center: { lat: number; lon: number };
   className?: string;
+  grid?: Array<{ lat: number; lon: number; aqi: number | null }>;
+  origin?: LatLng;
+  destination?: LatLng;
+  onOriginChange?: (p: LatLng) => void;
+  onDestinationChange?: (p: LatLng) => void;
+  routeCoords?: LatLng[];
+  routeMeta?: RouteResult | null;
+  routeLoading?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
+  const originMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const destMarkerRef = useRef<maplibregl.Marker | null>(null);
   const payloadRef = useRef(payload);
   payloadRef.current = payload;
 
@@ -67,7 +87,6 @@ export default function RadarMap({
     quake: true,
   });
   const [stations, setStations] = useState<StationPoint[]>([]);
-  const [grid, setGrid] = useState<Array<{ lat: number; lon: number; aqi: number | null }>>([]);
   const [quakes, setQuakes] = useState<GeoJSON.Feature<GeoJSON.Point>[]>([]);
   const [mapError, setMapError] = useState<string | null>(null);
   const [styleReady, setStyleReady] = useState(false);
@@ -119,6 +138,16 @@ export default function RadarMap({
     });
 
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
+
+    // Draggable route pins (origin = rose, destination = emerald).
+    if (origin && destination) {
+      originMarkerRef.current = createPinMarker(map, origin, true, (p) =>
+        onOriginChange?.(p),
+      );
+      destMarkerRef.current = createPinMarker(map, destination, false, (p) =>
+        onDestinationChange?.(p),
+      );
+    }
     // Non-fatal map errors (missing glyph/font ranges, tile 404s) are common
     // and must never take down the dashboard — only fatal style/source
     // failures surface in the UI.
@@ -164,6 +193,12 @@ export default function RadarMap({
     };
   }, [center.lat, center.lon]);
 
+  // --------------------------------------------- reposition route pins
+  useEffect(() => {
+    originMarkerRef.current?.setLngLat([origin?.lon ?? 0, origin?.lat ?? 0]);
+    destMarkerRef.current?.setLngLat([destination?.lon ?? 0, destination?.lat ?? 0]);
+  }, [origin, destination]);
+
   // ------------------------------------------------------- earthquake events
   useEffect(() => {
     let cancelled = false;
@@ -181,20 +216,7 @@ export default function RadarMap({
   }, [center.lat, center.lon]);
 
   // --------------------------------------------- AQI grid fallback coverage
-  useEffect(() => {
-    let cancelled = false;
-    fetchAqiGrid(center.lat, center.lon)
-      .then((points) => {
-        if (cancelled) return;
-        setGrid(points);
-      })
-      .catch(() => {
-        /* grid is a visual fallback only */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [center.lat, center.lon]);
+  // (grid lifted to Dashboard so the dose engine shares the same field)
 
   // ------------------------------------------------------- derive geo sources
   const geojson = useMemo(() => {
@@ -210,7 +232,7 @@ export default function RadarMap({
       geometry: { type: "Point" as const, coordinates: [s.lon, s.lat] },
     }));
 
-    const gridFeatures = grid.map((g) => ({
+    const gridFeatures = (grid ?? []).map((g) => ({
       type: "Feature" as const,
       properties: { aqi: g.aqi },
       geometry: { type: "Point" as const, coordinates: [g.lon, g.lat] },
@@ -245,8 +267,23 @@ export default function RadarMap({
       grid: { type: "FeatureCollection" as const, features: gridFeatures },
       bio: { type: "FeatureCollection" as const, features: bioFeatures },
       quakes: { type: "FeatureCollection" as const, features: quakeFeatures },
+      route: routeCoords && routeCoords.length >= 2
+        ? ({
+            type: "FeatureCollection" as const,
+            features: [
+              {
+                type: "Feature" as const,
+                properties: {},
+                geometry: {
+                  type: "LineString" as const,
+                  coordinates: routeCoords.map((c) => [c.lon, c.lat] as [number, number]),
+                },
+              },
+            ],
+          } as GeoJSON.FeatureCollection)
+        : ({ type: "FeatureCollection" as const, features: [] } as GeoJSON.FeatureCollection),
     };
-  }, [payload, stations, grid, quakes, center]);
+  }, [payload, stations, grid, quakes, center, routeCoords]);
 
   // ------------------------------------------------------------- layer sync
   useEffect(() => {
@@ -269,11 +306,16 @@ export default function RadarMap({
     syncSource(map, "grid-source", geojson.grid);
     syncSource(map, "bio-source", geojson.bio);
     syncSource(map, "quake-source", geojson.quakes);
+    syncSource(map, "route-source", geojson.route);
 
     const fireCount = geojson.fire.features.length;
     const bounds = new maplibregl.LngLatBounds([center.lon, center.lat], [center.lon, center.lat]);
     for (const f of geojson.fire.features) bounds.extend(f.geometry.coordinates as [number, number]);
     for (const f of geojson.stations.features) bounds.extend(f.geometry.coordinates as [number, number]);
+    for (const f of geojson.route.features) {
+      const c = (f.geometry as GeoJSON.LineString).coordinates as [number, number][];
+      c.forEach((coord) => bounds.extend(coord));
+    }
 
     map.fitBounds(bounds, { padding: 60, maxZoom: fireCount ? 10 : 11, duration: 700 });
   }, [styleReady, geojson, center]);
@@ -591,6 +633,24 @@ export default function RadarMap({
       );
     });
 
+    // Route line (live reroute between draggable pins)
+    map.addSource("route-source", {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+    map.addLayer({
+      id: "route-glow",
+      type: "line",
+      source: "route-source",
+      paint: { "line-color": "#10B981", "line-width": 8, "line-opacity": 0.22, "line-blur": 4 },
+    });
+    map.addLayer({
+      id: "route-line",
+      type: "line",
+      source: "route-source",
+      paint: { "line-color": "#34D399", "line-width": 3, "line-opacity": 0.95 },
+    });
+
     map.on("mouseenter", ["aqi-circle", "fire-core", "bio-point", "bio-cluster", "quake-ring"], () => {
       map.getCanvas().style.cursor = "pointer";
     });
@@ -638,6 +698,26 @@ export default function RadarMap({
         {toggleButton("Biodiversity", layers.bio, () => setLayers((l) => ({ ...l, bio: !l.bio })), "bg-cyan-500/20 text-cyan-300 border-cyan-500/40")}
         {toggleButton("Disasters", layers.quake, () => setLayers((l) => ({ ...l, quake: !l.quake })), "bg-violet-500/20 text-violet-300 border-violet-500/40")}
       </div>
+      <div className="absolute right-3 top-3 rounded-lg border border-emerald-500/30 bg-grid-bg/85 px-3 py-2 backdrop-blur">
+        {routeLoading ? (
+          <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-slate-400">
+            <span className="h-3 w-3 animate-spin rounded-full border-2 border-emerald-400 border-t-transparent" />
+            Rerouting…
+          </div>
+        ) : routeMeta ? (
+          <div className="font-mono text-[10px] uppercase tracking-widest">
+            <div className="flex items-center gap-2 text-emerald-300">
+              <Route className="h-3 w-3" /> Route A · {formatNumber(routeMeta.distanceKm, 1)} km ·{" "}
+              {Math.round(routeMeta.durationMin)} min
+            </div>
+            <div className="mt-0.5 flex items-center gap-2 text-slate-400">
+              <span className="h-1.5 w-1.5 rounded-full bg-rose-400" /> PM2.5{" "}
+              {routeMeta.avgPm25 === null ? "n/a" : `${formatNumber(routeMeta.avgPm25, 1)} µg/m³`}
+              <span className="text-slate-600">· drag pins</span>
+            </div>
+          </div>
+        ) : null}
+      </div>
       <div className="absolute bottom-3 left-3 rounded-lg border border-grid-border bg-grid-bg/80 p-2.5 backdrop-blur">
         <div className="space-y-1 font-mono text-[10px] uppercase tracking-widest text-slate-400">
           <div className="flex items-center gap-2">
@@ -673,6 +753,25 @@ function speciesHtml(s: SpeciesObservation): string {
       <div class="truncate text-[10px] italic text-slate-400">${escapeHtml(s.scientificName)} · ${s.count} sightings</div>
     </div>
   </div>`;
+}
+
+function createPinMarker(
+  map: MapLibreMap,
+  pos: LatLng,
+  isOrigin: boolean,
+  onChange: (p: LatLng) => void,
+): maplibregl.Marker {
+  const el = document.createElement("div");
+  el.className = isOrigin ? "route-pin route-pin--origin" : "route-pin route-pin--dest";
+  el.innerHTML = `<span class="route-pin__dot"></span>`;
+  const marker = new maplibregl.Marker({ element: el, anchor: "bottom", draggable: true })
+    .setLngLat([pos.lon, pos.lat])
+    .addTo(map);
+  marker.on("dragend", () => {
+    const ll = marker.getLngLat();
+    onChange({ lat: ll.lat, lon: ll.lng });
+  });
+  return marker;
 }
 
 function syncSource(map: MapLibreMap, id: string, data: unknown) {

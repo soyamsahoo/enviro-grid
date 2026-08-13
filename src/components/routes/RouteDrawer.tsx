@@ -1,9 +1,32 @@
 import { useEffect, useMemo, useState } from "react";
-import { Footprints, Leaf, Route, Timer, X, Zap } from "lucide-react";
+import {
+  Bike,
+  Footprints,
+  Leaf,
+  Loader2,
+  MapPin,
+  Route,
+  Timer,
+  X,
+  Zap,
+} from "lucide-react";
 import type { PersonaId } from "@/lib/ai/personas";
-import { computeRoutes, type RouteComparison } from "@/lib/exposure";
+import {
+  ACTIVITY_LEVELS,
+  computeRoutes,
+  type ActivityId,
+  type RouteComparison,
+} from "@/lib/exposure";
+import type { RouteResult } from "@/lib/routing";
 import type { AggregatePayload } from "@/lib/types";
 import { cn, formatNumber } from "@/lib/utils";
+
+const ACTIVITY_ORDER: ActivityId[] = ["runner", "cyclist", "walker"];
+const ACTIVITY_ICONS: Record<ActivityId, React.ReactNode> = {
+  runner: <Zap className="h-3.5 w-3.5" />,
+  cyclist: <Bike className="h-3.5 w-3.5" />,
+  walker: <Footprints className="h-3.5 w-3.5" />,
+};
 
 function RouteRow({ route, seconds, fastest }: { route: RouteComparison["routeA"]; seconds?: number; fastest?: boolean }) {
   return (
@@ -70,17 +93,30 @@ export default function RouteDrawer({
   persona,
   open,
   onClose,
+  routeMeta,
+  routeLoading,
 }: {
   payload: AggregatePayload | null;
   persona: PersonaId;
   open: boolean;
   onClose: () => void;
+  routeMeta?: RouteResult | null;
+  routeLoading?: boolean;
 }) {
   const [minutes, setMinutes] = useState(15);
+  const [activity, setActivity] = useState<ActivityId>("walker");
+
+  const live = Boolean(routeMeta?.coords.length);
+  const minutesA = routeMeta ? Math.max(1, Math.round(routeMeta.durationMin)) : minutes;
 
   const comparison = useMemo(
-    () => computeRoutes(payload, persona, minutes),
-    [payload, persona, minutes],
+    () =>
+      computeRoutes(payload, persona, minutes, {
+        activityId: activity,
+        streetPm25: routeMeta?.avgPm25 ?? undefined,
+        minutesA,
+      }),
+    [payload, persona, minutes, activity, routeMeta, minutesA],
   );
 
   useEffect(() => {
@@ -127,29 +163,80 @@ export default function RouteDrawer({
         </div>
 
         <div className="scrollbar-thin flex-1 space-y-4 overflow-y-auto p-5">
+          {/* Dynamic activity toggle (V̇e in L/min) — recomputes the dose live */}
+          <div>
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="font-mono text-[10px] uppercase tracking-widest text-slate-500">
+                Dynamic activity · minute ventilation
+              </span>
+              <span className="font-mono text-[10px] text-emerald-400">
+                V̇e = {ACTIVITY_LEVELS[activity].lperMin} L/min
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-1">
+              {ACTIVITY_ORDER.map((a) => (
+                <button
+                  key={a}
+                  onClick={() => setActivity(a)}
+                  className={cn(
+                    "flex flex-col items-center gap-0.5 rounded-lg border px-2 py-2 transition-all",
+                    activity === a
+                      ? "border-emerald-500/40 bg-emerald-500/10 shadow-[0_0_16px_-6px_rgba(16,185,129,0.6)]"
+                      : "border-grid-border text-slate-500 hover:border-slate-600 hover:text-slate-300",
+                  )}
+                >
+                  <span className={cn(activity === a && "text-emerald-300")}>
+                    {ACTIVITY_ICONS[a]}
+                  </span>
+                  <span className="text-xs font-medium text-slate-200">
+                    {ACTIVITY_LEVELS[a].label}
+                  </span>
+                  <span className="font-mono text-[9px] uppercase tracking-wider text-slate-500">
+                    {ACTIVITY_LEVELS[a].lperMin} L/min
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+
           {!comparison ? (
             <div className="flex h-40 items-center justify-center rounded-xl border border-dashed border-grid-border text-sm text-slate-500">
               No PM2.5 data yet — wait for the feeds to load.
             </div>
           ) : (
             <>
-              {/* activity duration selector */}
-              <div className="flex items-center gap-1">
-                {[5, 15, 30, 60].map((m) => (
-                  <button
-                    key={m}
-                    onClick={() => setMinutes(m)}
-                    className={cn(
-                      "flex-1 rounded-lg border px-2 py-1.5 font-mono text-[11px] uppercase tracking-wider transition-colors",
-                      minutes === m
-                        ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-                        : "border-grid-border text-slate-500 hover:text-slate-300",
-                    )}
-                  >
-                    {m} min
-                  </button>
-                ))}
-              </div>
+              {/* live map route meta */}
+              {live ? (
+                <div className="flex items-center gap-2 rounded-xl border border-cyan-500/25 bg-cyan-500/5 px-3 py-2.5 font-mono text-[10px] uppercase tracking-widest text-cyan-300">
+                  {routeLoading ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <MapPin className="h-3.5 w-3.5" />
+                  )}
+                  <span>
+                    Live map route · {formatNumber(routeMeta!.distanceKm, 1)} km ·{" "}
+                    {Math.round(routeMeta!.durationMin)} min — drag the pins to reroute
+                  </span>
+                </div>
+              ) : (
+                /* fallback duration selector (no live route yet) */
+                <div className="flex items-center gap-1">
+                  {[5, 15, 30, 60].map((m) => (
+                    <button
+                      key={m}
+                      onClick={() => setMinutes(m)}
+                      className={cn(
+                        "flex-1 rounded-lg border px-2 py-1.5 font-mono text-[11px] uppercase tracking-wider transition-colors",
+                        minutes === m
+                          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                          : "border-grid-border text-slate-500 hover:text-slate-300",
+                      )}
+                    >
+                      {m} min
+                    </button>
+                  ))}
+                </div>
+              )}
 
               <RouteRow route={comparison.routeA} fastest />
               <RouteRow
@@ -172,8 +259,9 @@ export default function RouteDrawer({
               </div>
 
               <p className="rounded-xl border border-grid-border bg-grid-panel2 p-3 font-mono text-[10px] leading-relaxed text-slate-500">
-                Dose model: PM2.5 × {formatNumber(comparison.ventilation.m3perMin, 3)} m³/min
-                ({comparison.ventilation.label.toLowerCase()}) × minutes / 22 µg per cigarette.
+                Dose model: PM2.5 ×{" "}
+                {formatNumber(comparison.ventilation.m3perMin * 1000, 0)} L/min (V̇e,{" "}
+                {comparison.ventilation.label.toLowerCase()}) × minutes / 22 µg per cigarette.
                 Clean corridor factor: {comparison.cleanFactor}× street PM2.5.
               </p>
             </>

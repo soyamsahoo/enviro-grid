@@ -69,3 +69,30 @@ body {
 .map-layer-legend {
   @apply font-mono text-[10px] uppercase tracking-widest text-slate-400;
 }
+
+/* Draggable route pins (origin rose / destination emerald) */
+.route-pin {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  cursor: grab;
+}
+.route-pin:active {
+  cursor: grabbing;
+}
+.route-pin__dot {
+  width: 15px;
+  height: 15px;
+  border-radius: 9999px;
+  border: 3px solid #0e1420;
+  box-shadow: 0 0 0 2px currentColor, 0 0 14px currentColor;
+}
+.route-pin--origin {
+  color: #f43f5e;
+}
+.route-pin--dest {
+  color: #10b981;
+}
