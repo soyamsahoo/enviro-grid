@@ -50,3 +50,60 @@ export async function fetchMicroclimate(lat: number, lon: number): Promise<Micro
     },
   };
 }
+
+export function emptyMicroclimate(): Microclimate {
+  return {
+    temperature_2m: null,
+    relative_humidity_2m: null,
+    wind_speed_10m: null,
+    uv_index: null,
+    precipitation_probability: null,
+    apparent_temperature: null,
+    weather_code: null,
+    source: "openmeteo",
+  };
+}
+
+/**
+ * Historical climate baselines from the Open-Meteo Archive API:
+ * 30-day daily means for temperature and humidity.
+ * Keyless, CORS-enabled.
+ */
+export async function fetchHistoricalAverages(
+  lat: number,
+  lon: number,
+  days = 30,
+): Promise<{ temp_avg_30d: number | null; humidity_avg_30d: number | null }> {
+  const end = new Date();
+  end.setUTCDate(end.getUTCDate() - 1);
+  const start = new Date(end);
+  start.setUTCDate(start.getUTCDate() - (days - 1));
+
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+  const url =
+    `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}` +
+    `&start_date=${fmt(start)}&end_date=${fmt(end)}` +
+    "&daily=temperature_2m_mean,relative_humidity_2m_mean&timezone=auto";
+
+  try {
+    const data = await fetchJson<{
+      daily?: {
+        temperature_2m_mean?: (number | null)[];
+        relative_humidity_2m_mean?: (number | null)[];
+      };
+    }>(url);
+
+    const temps = (data.daily?.temperature_2m_mean ?? []).filter((v): v is number => v !== null);
+    const hums = (data.daily?.relative_humidity_2m_mean ?? []).filter((v): v is number => v !== null);
+    const avg = (arr: number[]) =>
+      arr.length ? arr.reduce((s, v) => s + v, 0) / arr.length : null;
+
+    return {
+      temp_avg_30d: avg(temps),
+      humidity_avg_30d: avg(hums),
+    };
+  } catch (err) {
+    console.warn("[history] Open-Meteo archive unavailable:", err);
+    return { temp_avg_30d: null, humidity_avg_30d: null };
+  }
+}

@@ -7,7 +7,7 @@ export interface AirQuality {
   o3: number | null;
   aqi: number | null;
   aqi_category: string;
-  source: "openaq";
+  source: "openaq" | "open-meteo";
   stations: number;
 }
 
@@ -46,6 +46,33 @@ export interface SpeciesObservation {
   count: number;
 }
 
+/** Hourly AQI forecast point (+ optional forecast temperature). */
+export interface AqiForecastPoint {
+  time: string;
+  us_aqi: number | null;
+  pm25: number | null;
+}
+
+/** Historical baselines for delta comparison. */
+export interface HistoryDelta {
+  aqi_yesterday_avg: number | null;
+  temp_avg_30d: number | null;
+  humidity_avg_30d: number | null;
+}
+
+export interface TaxonGroup {
+  label: string;
+  count: number;
+}
+
+export interface BioIndicators {
+  present: boolean;
+  bees: number;
+  butterflies: number;
+  amphibians: number;
+  total_sensitive: number;
+}
+
 export interface AggregatePayload {
   location: { lat: number; lon: number; name?: string };
   fetched_at: string;
@@ -54,6 +81,12 @@ export interface AggregatePayload {
   fire_hotspots: FireHotspot[];
   biodiversity: SpeciesObservation[];
   total_occurrences: number;
+  /** Forward forecast: hourly us_aqi (+pm2.5) from Open-Meteo AQ model. */
+  aqi_forecast: AqiForecastPoint[];
+  /** Historical baselines for delta badges. */
+  history: HistoryDelta;
+  /** Taxonomic + bio-indicator breakdown of local biodiversity. */
+  taxonomy: { groups: TaxonGroup[]; indicators: BioIndicators };
 }
 
 export interface PersonaScore {
@@ -64,4 +97,46 @@ export interface PersonaScore {
   verified_why: string;
   actionable_advice: string[];
   forecast_summary: string;
+}
+
+/** Administrative hierarchy for the breadcrumb spatial navigation. */
+export interface GeoHierarchy {
+  country?: string;
+  admin1?: string;
+  city?: string;
+  locality?: string;
+  neighbourhood?: string;
+}
+
+export interface SearchLocation extends GeoHierarchy {
+  lat: number;
+  lon: number;
+  name: string;
+}
+
+/** Alert rule configured by the user. */
+export interface AlertRule {
+  id: string;
+  metric: AlertMetricKey;
+  threshold: number;
+  direction: "above" | "below";
+  enabled: boolean;
+  email?: string;
+  createdAt: string;
+}
+
+export type AlertMetricKey =
+  | "aqi"
+  | "pm25"
+  | "pm10"
+  | "uv"
+  | "temperature"
+  | "humidity"
+  | "rain"
+  | "fire_count";
+
+export interface AlertState extends AlertRule {
+  value: number | null;
+  triggered: boolean;
+  lastTriggeredAt?: string;
 }

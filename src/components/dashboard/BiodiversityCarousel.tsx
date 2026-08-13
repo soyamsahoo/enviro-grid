@@ -6,7 +6,31 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 export default function BiodiversityCarousel({ payload }: { payload: AggregatePayload }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const species = payload.biodiversity;
-  if (species.length === 0) return null;
+
+  if (species.length === 0) {
+    return (
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-emerald-300">
+            <Leaf className="h-4 w-4" />
+            Foundation Layer — Local Biodiversity
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
+            <Leaf className="h-8 w-8 text-slate-600" />
+            <p className="text-sm text-slate-400">
+              No recent species cataloged for this area.
+            </p>
+            <p className="max-w-sm text-xs text-slate-500">
+              GBIF returned no occurrence records within 15 km, or the
+              biodiversity feed was unavailable. Try a different location.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   const scroll = (dir: 1 | -1) => {
     scrollRef.current?.scrollBy({ left: dir * 320, behavior: "smooth" });

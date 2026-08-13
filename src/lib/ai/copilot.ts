@@ -1,7 +1,7 @@
 import type { AggregatePayload, PersonaScore, RiskLevel } from "@/lib/types";
 import type { PersonaId } from "./personas";
 import { PERSONA_PROFILES } from "./personas";
-import { buildCopilotPrompt } from "./prompt";
+import { buildCopilotPrompt, compactPayload } from "./prompt";
 
 export interface CopilotResult {
   score: PersonaScore;
@@ -15,6 +15,13 @@ const RISK_LEVELS: RiskLevel[] = ["Low", "Moderate", "High", "Severe"];
 const GEMINI_MODEL = import.meta.env.VITE_LLM_MODEL ?? "gemini-3-flash-preview";
 
 /**
+ * Gemini Interactions endpoint — always same-origin: the Vite dev proxy
+ * and the Vercel `api/gemini` serverless function both serve /api/gemini,
+ * because Google's endpoint rejects browser CORS preflights (403, no ACAO).
+ */
+const GEMINI_BASE = "/api/gemini";
+
+/**
  * Persona-based AI copilot. Returns a strict-JSON PersonaScore.
  * Uses Gemini 1.5 Flash / OpenAI when LLM_API_KEY is set; otherwise
  * falls back to a deterministic local scorer so the app stays functional.
@@ -23,16 +30,14 @@ export async function generatePersonaScore(
   payload: AggregatePayload,
   personaId: PersonaId,
 ): Promise<CopilotResult> {
-  const key = import.meta.env.VITE_LLM_API_KEY;
-
-  if (key) {
+  if (import.meta.env.VITE_LLM_API_KEY) {
     const provider: "gemini" | "openai" =
       (import.meta.env.VITE_LLM_PROVIDER ?? "gemini").toLowerCase() === "openai"
         ? "openai"
         : "gemini";
     try {
-      const raw = await callLLM(buildCopilotPrompt(payload, personaId), provider, key);
-      return { score: sanitizeScore(raw), fromLLM: true, provider };
+      const raw = await runLLMText(buildCopilotPrompt(payload, personaId), { json: true });
+      return { score: sanitizeScore(parseJsonScore(raw)), fromLLM: true, provider };
     } catch (err) {
       console.warn("[copilot] LLM failed, using local fallback:", err);
     }
@@ -42,10 +47,23 @@ export async function generatePersonaScore(
 }
 
 // ---------------------------------------------------------------------------
-// LLM execution (Gemini 1.5 Flash + OpenAI chat completions, JSON mode)
+// LLM execution (Gemini Interactions API + OpenAI chat completions)
 // ---------------------------------------------------------------------------
 
-async function callLLM(prompt: string, provider: string, key: string): Promise<PersonaScore> {
+/** Raw-text LLM call shared by the JSON scorer and the chat interface. */
+export async function runLLMText(
+  prompt: string,
+  opts?: { json?: boolean; temperature?: number },
+): Promise<string> {
+  const key = import.meta.env.VITE_LLM_API_KEY;
+  if (!key) throw new Error("LLM_API_KEY not configured");
+
+  const provider: "gemini" | "openai" =
+    (import.meta.env.VITE_LLM_PROVIDER ?? "gemini").toLowerCase() === "openai"
+      ? "openai"
+      : "gemini";
+  const json = opts?.json ?? false;
+
   if (provider === "openai") {
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -55,17 +73,17 @@ async function callLLM(prompt: string, provider: string, key: string): Promise<P
       },
       body: JSON.stringify({
         model: "gpt-4o-mini",
-        temperature: 0.2,
-        response_format: { type: "json_object" },
+        temperature: opts?.temperature ?? 0.2,
+        ...(json ? { response_format: { type: "json_object" } } : {}),
         messages: [{ role: "system", content: prompt }],
       }),
     });
     if (!res.ok) throw new Error(`OpenAI ${res.status}`);
     const data = await res.json();
-    return parseJsonScore(data.choices?.[0]?.message?.content ?? "");
+    return data.choices?.[0]?.message?.content ?? "";
   }
 
-  const res = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+  const res = await fetch(`${GEMINI_BASE}/v1beta/interactions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -76,7 +94,7 @@ async function callLLM(prompt: string, provider: string, key: string): Promise<P
       model: GEMINI_MODEL,
       store: false,
       input: [{ type: "text", text: prompt }],
-      response_format: { type: "text", mime_type: "application/json" },
+      ...(json ? { response_format: { type: "text", mime_type: "application/json" } } : {}),
       generation_config: { thinking_level: "low" },
     }),
   });
@@ -84,7 +102,33 @@ async function callLLM(prompt: string, provider: string, key: string): Promise<P
   const data = await res.json();
   const text = extractInteractionText(data);
   if (!text) throw new Error("Gemini returned no text content");
-  return parseJsonScore(text);
+  return text;
+}
+
+/**
+ * Conversational copilot: answers an arbitrary user question about the
+ * active location, grounding every claim in the live payload JSON.
+ */
+export async function copilotChat(
+  payload: AggregatePayload,
+  personaId: PersonaId,
+  question: string,
+): Promise<string> {
+  const profile = PERSONA_PROFILES[personaId];
+  const prompt =
+    `You are ENVIROGRID's conversational environmental copilot for the "${profile.label}" persona.\n` +
+    `Answer the user's question conversationally and concisely (max ~120 words).\n` +
+    `Rules:\n` +
+    `- Only use the measured values in the payload below. If the data cannot answer the question, say so plainly.\n` +
+    `- Quote concrete values (e.g. "AQI 63", "PM2.5 at 42 µg/m³", "UV 7") when relevant.\n` +
+    `- Give one-line actionable advice tied to the persona.\n` +
+    `- Never invent numbers, forecasts, or causal links.\n\n` +
+    `PERSONA: ${profile.label}\n` +
+    `LOCATION: ${payload.location.name ?? `${payload.location.lat.toFixed(3)}, ${payload.location.lon.toFixed(3)}`}\n` +
+    `LIVE PAYLOAD:\n${JSON.stringify(compactPayload(payload), null, 2)}\n\n` +
+    `USER QUESTION: ${question}`;
+
+  return runLLMText(prompt);
 }
 
 /** Reads model output from an Interactions API response (steps timeline). */

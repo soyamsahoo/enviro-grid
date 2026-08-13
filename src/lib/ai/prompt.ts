@@ -48,7 +48,7 @@ OUTPUT ONLY JSON, no markdown fences, no commentary. Schema:
 }`;
 }
 
-function compactPayload(payload: AggregatePayload) {
+export function compactPayload(payload: AggregatePayload) {
   return {
     location: payload.location,
     fetched_at: payload.fetched_at,

@@ -1,15 +1,27 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Radar, Database, BrainCircuit, Loader2, Satellite } from "lucide-react";
+import {
+  AlertTriangle,
+  Bell,
+  BrainCircuit,
+  Database,
+  Download,
+  Leaf,
+  Loader2,
+  Radar,
+  Satellite,
+} from "lucide-react";
 import type { PersonaId } from "@/lib/ai/personas";
-import type { AggregatePayload } from "@/lib/types";
+import type { AggregatePayload, AlertRule, SearchLocation } from "@/lib/types";
 import { PERSONA_PROFILES } from "@/lib/ai/personas";
 import { generatePersonaScore } from "@/lib/ai/copilot";
 import { aggregateEnvironment, recordSearch } from "@/lib/services/apiAggregator";
 import { isSupabaseConfigured, checkSupabaseTables } from "@/lib/services/supabase";
+import { reverseGeocode } from "@/components/dashboard/LocationSearch";
 import { timeAgo } from "@/lib/utils";
-import type { SearchLocation } from "@/components/dashboard/LocationSearch";
+import { exportSnapshotCSV, exportSnapshotJSON, exportSnapshotPDF } from "@/lib/export";
 import LocationSearch from "@/components/dashboard/LocationSearch";
+import BreadcrumbNav from "@/components/dashboard/BreadcrumbNav";
 import PersonaSelector from "@/components/dashboard/PersonaSelector";
 import RadarMap from "@/components/map/RadarMap";
 import ScoreGauge from "@/components/score/ScoreGauge";
@@ -17,7 +29,11 @@ import VerifiedWhyCard from "@/components/dashboard/VerifiedWhyCard";
 import MetricsGrid from "@/components/dashboard/MetricsGrid";
 import BiodiversityCarousel from "@/components/dashboard/BiodiversityCarousel";
 import TrendChart from "@/components/dashboard/TrendChart";
-import { Badge } from "@/components/ui/badge";
+import ForecastCards from "@/components/dashboard/ForecastCards";
+import BioAnalytics from "@/components/dashboard/BioAnalytics";
+import DeltaBadges from "@/components/dashboard/DeltaBadges";
+import CopilotChat from "@/components/chat/CopilotChat";
+import AlertsModal, { evaluateAlerts } from "@/components/alerts/AlertsModal";
 
 const DEFAULT_LOCATION: SearchLocation = {
   lat: 40.7128,
@@ -29,6 +45,7 @@ export default function Dashboard() {
   const [location, setLocation] = useState<SearchLocation>(DEFAULT_LOCATION);
   const [persona, setPersona] = useState<PersonaId>("general_citizen");
   const [locating, setLocating] = useState(false);
+  const [alertsOpen, setAlertsOpen] = useState(false);
 
   const [supabaseInfo, setSupabaseInfo] = useState<{
     configured: boolean;
@@ -84,12 +101,26 @@ export default function Dashboard() {
     if (!navigator.geolocation) return;
     setLocating(true);
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setLocation({
+      async (pos) => {
+        const base = {
           lat: pos.coords.latitude,
           lon: pos.coords.longitude,
           name: "My location",
-        });
+        } as SearchLocation;
+        const geo = await reverseGeocode(base.lat, base.lon).catch(() => null);
+        const g = geo as Partial<SearchLocation> | null;
+        setLocation(
+          g && (g.country || g.city || g.locality)
+            ? {
+                ...base,
+                name: [g.city, g.admin1, g.country].filter(Boolean).join(", ") || base.name,
+                country: g.country,
+                admin1: g.admin1,
+                city: g.city,
+                locality: g.locality,
+              }
+            : base,
+        );
         setLocating(false);
       },
       () => setLocating(false),
@@ -114,6 +145,53 @@ export default function Dashboard() {
     return missing;
   }, []);
 
+  // ------------------------------------------------------------- alerts
+  const [alertRules, setAlertRules] = useState<AlertRule[]>(() => {
+    try {
+      const raw = localStorage.getItem("envirogrid.alert_rules.v1");
+      return raw ? (JSON.parse(raw) as AlertRule[]) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const triggeredAlerts = useMemo(
+    () => (payload ? evaluateAlerts(alertRules, payload).filter((s) => s.triggered) : []),
+    [alertRules, payload],
+  );
+
+  useEffect(() => {
+    localStorage.setItem("envirogrid.alert_rules.v1", JSON.stringify(alertRules));
+  }, [alertRules]);
+
+  const hierarchy = useMemo<AggregatePayload["location"] & { country?: string; admin1?: string; city?: string; locality?: string }>(() => {
+    const loc = location as SearchLocation;
+    return {
+      lat: loc.lat,
+      lon: loc.lon,
+      name: loc.name,
+      country: loc.country,
+      admin1: loc.admin1,
+      city: loc.city,
+      locality: loc.locality,
+    };
+  }, [location]);
+
+  const handleBreadcrumbSelect = useCallback(
+    (loc: { lat: number; lon: number; name: string; admin1?: string; country?: string; city?: string }) => {
+      setLocation({ ...loc, locality: undefined });
+    },
+    [],
+  );
+
+  const handleExport = (format: "json" | "csv" | "pdf") => {
+    if (!payload) return;
+    const name = location.name || "location";
+    if (format === "json") exportSnapshotJSON(payload, name);
+    else if (format === "csv") exportSnapshotCSV(payload, name);
+    else exportSnapshotPDF(payload, name);
+  };
+
   return (
     <div className="min-h-full">
       {/* ------------------------------------------------------------ header */}
@@ -134,15 +212,56 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <LocationSearch
-            onSelect={setLocation}
-            onUseCurrent={useCurrentLocation}
-            current={location}
-            locating={locating}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <LocationSearch
+              onSelect={setLocation}
+              onUseCurrent={useCurrentLocation}
+              current={location}
+              locating={locating}
+            />
+            <button
+              onClick={() => setAlertsOpen(true)}
+              className="relative flex h-9 w-9 items-center justify-center rounded-lg border border-grid-border bg-grid-panel2 text-slate-400 transition-colors hover:text-emerald-300"
+              title="Alert rules"
+            >
+              <Bell className="h-4 w-4" />
+              {triggeredAlerts.length > 0 && (
+                <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 font-mono text-[9px] font-bold text-white">
+                  {triggeredAlerts.length}
+                </span>
+              )}
+            </button>
+            <div className="relative">
+              <button
+                className="flex h-9 items-center gap-1.5 rounded-lg border border-grid-border bg-grid-panel2 px-3 text-slate-400 transition-colors hover:text-emerald-300"
+                title="Export snapshot"
+              >
+                <Download className="h-4 w-4" />
+                <span className="hidden text-xs sm:inline">Export</span>
+              </button>
+              <div className="absolute right-0 top-full z-30 mt-1 hidden w-36 overflow-hidden rounded-lg border border-grid-border bg-grid-panel shadow-xl peer-open:block" onMouseEnter={(e) => (e.currentTarget.style.display = "block")} onMouseLeave={(e) => (e.currentTarget.style.display = "none")}>
+                {(["json", "csv", "pdf"] as const).map((f) => (
+                  <button
+                    key={f}
+                    onClick={() => handleExport(f)}
+                    className="block w-full px-3 py-1.5 text-left font-mono text-[11px] uppercase tracking-wider text-slate-300 hover:bg-secondary"
+                  >
+                    {f === "json" ? "JSON" : f === "csv" ? "CSV" : "PDF"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 pb-3">
+          <div className="min-w-0 flex-1">
+            <BreadcrumbNav
+              hierarchy={hierarchy}
+              onSelect={handleBreadcrumbSelect}
+              onReset={() => setLocation(DEFAULT_LOCATION)}
+            />
+          </div>
           <PersonaSelector value={persona} onChange={setPersona} />
           <div className="flex items-center gap-2 text-xs text-slate-500">
             {loading ? (
@@ -184,8 +303,7 @@ export default function Dashboard() {
             Supabase tables not found
             {supabaseInfo.missingTables.length > 0 && (
               <>
-                :{" "}
-                <span className="font-mono">{supabaseInfo.missingTables.join(", ")}</span>
+                : <span className="font-mono">{supabaseInfo.missingTables.join(", ")}</span>
               </>
             )}
             . Run{" "}
@@ -213,16 +331,28 @@ export default function Dashboard() {
           </div>
 
           <div className="flex flex-col gap-4">
-            <VerifiedWhyCard score={copilotQuery.data?.score ?? null} fromLLM={Boolean(copilotQuery.data?.fromLLM)} />
+            <VerifiedWhyCard
+              score={copilotQuery.data?.score ?? null}
+              fromLLM={Boolean(copilotQuery.data?.fromLLM)}
+            />
             <MetricsGrid payload={payload ?? emptyPayload()} />
           </div>
         </section>
 
+      <section>
+          <ForecastCards payload={payload ?? emptyPayload()} />
+        </section>
+
         {/* -------------------------------------------------------- map */}
         <section className="grid gap-4 xl:grid-cols-[1fr_340px]">
-          <RadarMap payload={payload} center={{ lat: location.lat, lon: location.lon }} className="h-[520px]" />
+          <RadarMap
+            payload={payload}
+            center={{ lat: location.lat, lon: location.lon }}
+            className="h-[520px]"
+          />
           <div className="flex flex-col gap-4">
             <TrendChart payload={payload ?? emptyPayload()} />
+            <DeltaBadges payload={payload ?? emptyPayload()} />
             <div className="glass flex-1 rounded-xl p-5">
               <div className="mb-3 flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-slate-500">
                 <Database className="h-3.5 w-3.5" /> Data pipeline
@@ -230,8 +360,8 @@ export default function Dashboard() {
               <ul className="space-y-2.5 text-xs text-slate-400">
                 {[
                   ["OpenAQ", "PM2.5 · PM10 · NO₂ · AQI", "bg-emerald-400"],
-                  ["Open-Meteo", "Temp · humidity · wind · UV · rain", "bg-cyan-400"],
-                  ["NASA FIRMS", "Active fire hotspots (25 km)", "bg-red-400"],
+                  ["Open-Meteo", "Temp · humidity · wind · UV · rain · 3h AQI forecast", "bg-cyan-400"],
+                  ["NASA FIRMS", "Active fire hotspots (100 km)", "bg-red-400"],
                   ["GBIF", "Biodiversity occurrences (15 km)", "bg-green-400"],
                   ["Wikipedia", "Common names + species images", "bg-amber-400"],
                 ].map(([src, desc, dot]) => (
@@ -244,24 +374,41 @@ export default function Dashboard() {
                 ))}
               </ul>
               <div className="mt-4 border-t border-grid-border pt-3">
-                <Badge variant="outline" className="font-mono text-[10px]">
-                  15-min cache · PostGIS-backed
-                </Badge>
+                <div className="flex flex-wrap gap-2">
+                  <span className="rounded-md border border-grid-border px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-slate-500">
+                    15-min cache · PostGIS-backed
+                  </span>
+                  {triggeredAlerts.length > 0 && (
+                    <span className="flex items-center gap-1 rounded-md border border-red-500/40 bg-red-500/10 px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-red-400">
+                      <AlertTriangle className="h-3 w-3" /> {triggeredAlerts.length} alert
+                      {triggeredAlerts.length > 1 ? "s" : ""} active
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
           </div>
         </section>
 
         {/* ------------------------------------------------ biodiversity */}
-        <section>
-          {payload ? (
-            <BiodiversityCarousel payload={payload} />
-          ) : (
+        <section className="space-y-4">
+          <BioAnalytics payload={payload ?? emptyPayload()} />
+          {envQuery.isLoading ? (
             <div className="glass flex h-40 items-center justify-center rounded-xl text-sm text-slate-500">
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               Fetching local species…
             </div>
-          )}
+          ) : envQuery.isError ? (
+            <div className="glass flex h-40 flex-col items-center justify-center gap-1 rounded-xl text-sm text-slate-500">
+              <Leaf className="h-6 w-6 text-slate-600" />
+              No recent species cataloged for this area.
+              <span className="text-xs text-slate-600">
+                The biodiversity feed is unavailable right now.
+              </span>
+            </div>
+          ) : payload ? (
+            <BiodiversityCarousel payload={payload} />
+          ) : null}
         </section>
       </main>
 
@@ -269,6 +416,16 @@ export default function Dashboard() {
         ENVIROGRID 2.0 · multi-source environmental intelligence · data: OpenAQ, Open-Meteo,
         NASA FIRMS, GBIF, Wikipedia
       </footer>
+
+      {alertsOpen && (
+        <AlertsModal
+          payload={payload}
+          rules={alertRules}
+          onRulesChange={setAlertRules}
+          onClose={() => setAlertsOpen(false)}
+        />
+      )}
+      <CopilotChat payload={payload} persona={persona} />
     </div>
   );
 }
@@ -278,16 +435,30 @@ function emptyPayload(): AggregatePayload {
     location: { lat: 0, lon: 0, name: "" },
     fetched_at: new Date().toISOString(),
     air_quality: {
-      pm25: null, pm10: null, no2: null, o3: null,
-      aqi: null, aqi_category: "No data", source: "openaq", stations: 0,
+      pm25: null,
+      pm10: null,
+      no2: null,
+      o3: null,
+      aqi: null,
+      aqi_category: "No data",
+      source: "openaq",
+      stations: 0,
     },
     microclimate: {
-      temperature_2m: null, relative_humidity_2m: null, wind_speed_10m: null,
-      uv_index: null, precipitation_probability: null, apparent_temperature: null,
-      weather_code: null, source: "openmeteo",
+      temperature_2m: null,
+      relative_humidity_2m: null,
+      wind_speed_10m: null,
+      uv_index: null,
+      precipitation_probability: null,
+      apparent_temperature: null,
+      weather_code: null,
+      source: "openmeteo",
     },
     fire_hotspots: [],
     biodiversity: [],
     total_occurrences: 0,
+    aqi_forecast: [],
+    history: { aqi_yesterday_avg: null, temp_avg_30d: null, humidity_avg_30d: null },
+    taxonomy: { groups: [], indicators: { present: false, bees: 0, butterflies: 0, amphibians: 0, total_sensitive: 0 } },
   };
 }

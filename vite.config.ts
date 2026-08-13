@@ -9,6 +9,26 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  server: {
+    port: 5173,
+    proxy: {
+      "/api/openaq": {
+        target: "https://api.openaq.org",
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/api\/openaq/, ""),
+      },
+      "/api/firms": {
+        target: "https://firms.modaps.eosdis.nasa.gov",
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/api\/firms/, ""),
+      },
+      "/api/gemini": {
+        target: "https://generativelanguage.googleapis.com",
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/api\/gemini/, ""),
+      },
+    },
+  },
   build: {
     rollupOptions: {
       output: {
@@ -20,8 +40,5 @@ export default defineConfig({
         },
       },
     },
-  },
-  server: {
-    port: 5173,
   },
 });

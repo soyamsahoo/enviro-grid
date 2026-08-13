@@ -5,18 +5,31 @@ import { fetchText } from "./http";
  * NASA FIRMS active fire data.
  * Docs: https://firms.modaps.eosdis.nasa.gov/api/area/
  * Area queries return CSV — we round-trip through a text proxy to keep
- * everything in one pure fetch pipeline.
+ * everything in one pure fetch pipeline. /api/firms is served by the
+ * Vite dev proxy locally and by the Vercel `api/firms` function in prod.
  */
-const AREA_CSV_BASE =
-  "https://firms.modaps.eosdis.nasa.gov/api/area/csv";
+const AREA_CSV_BASE = "/api/firms/api/area/csv";
 
 /** WGS84 source constants used by FIRMS area queries. */
 const FIRMS_SOURCES = ["VIIRS_SNPP_NRT", "VIIRS_NOAA20_NRT"] as const;
+
+/** Approximate lat/lon degrees spanned by `radiusKm` (equirectangular). */
+function boundingBox(lat: number, lon: number, radiusKm: number): string {
+  const degLat = radiusKm / 111.32;
+  const cosLat = Math.max(0.2, Math.cos((lat * Math.PI) / 180));
+  const degLon = radiusKm / (111.32 * cosLat);
+  const west = lon - degLon;
+  const east = lon + degLon;
+  const south = lat - degLat;
+  const north = lat + degLat;
+  return `${west},${south},${east},${north}`;
+}
 
 export async function fetchFireHotspots(
   lat: number,
   lon: number,
   radiusKm = 25,
+  dayRange = 2,
 ): Promise<FireHotspot[]> {
   const key = import.meta.env.VITE_NASA_FIRMS_MAP_KEY;
   if (!key) return [];
@@ -24,7 +37,8 @@ export async function fetchFireHotspots(
   const hotspots: FireHotspot[] = [];
   for (const source of FIRMS_SOURCES) {
     try {
-      const url = `${AREA_CSV_BASE}/${key}/${source}/${lon},${lat}/${radiusKm}/2`;
+      const url =
+        `${AREA_CSV_BASE}/${key}/${source}/${boundingBox(lat, lon, radiusKm)}/${dayRange}`;
       const text = await fetchText(url);
       hotspots.push(...parseFirmsCsv(text));
     } catch {

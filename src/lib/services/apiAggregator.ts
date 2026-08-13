@@ -1,12 +1,35 @@
 import type { AggregatePayload } from "@/lib/types";
-import { fetchAirQuality } from "./openaq";
-import { fetchMicroclimate } from "./openmeteo";
+import { fetchAirQuality, emptyAirQuality, fetchAqiForecast } from "./openaq";
+import { fetchMicroclimate, emptyMicroclimate, fetchHistoricalAverages } from "./openmeteo";
 import { fetchFireHotspots } from "./nasafirms";
-import { fetchBiodiversity, type GbifOccurrenceResult } from "./gbif";
+import { fetchBiodiversity } from "./gbif";
 import { enrichMany } from "./wikipedia";
 import { readCache, writeCache } from "./cache";
 import type { SpeciesMeta } from "./gbif";
 import { getSupabase } from "./supabase";
+
+/** Never lets one provider failure reject the whole aggregation. */
+async function safe<T>(promise: Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await promise;
+  } catch (err) {
+    console.warn("[aggregator] provider failed; using fallback:", err);
+    return fallback;
+  }
+}
+
+/** Backfills fields absent from payloads cached before v2 features landed. */
+function normalizePayload(p: AggregatePayload): AggregatePayload {
+  return {
+    ...p,
+    aqi_forecast: p.aqi_forecast ?? [],
+    history: p.history ?? { aqi_yesterday_avg: null, temp_avg_30d: null, humidity_avg_30d: null },
+    taxonomy: p.taxonomy ?? {
+      groups: [],
+      indicators: { present: false, bees: 0, butterflies: 0, amphibians: 0, total_sensitive: 0 },
+    },
+  };
+}
 
 export interface AggregatorOptions {
   lat: number;
@@ -33,18 +56,24 @@ export async function aggregateEnvironment(
   if (useCache) {
     const cached = await readCache<AggregatePayload>(rounded.lat, rounded.lon);
     if (cached.hit && cached.payload) {
-      return { payload: cached.payload, fromCache: true };
+      return { payload: normalizePayload(cached.payload), fromCache: true };
     }
   }
 
-  const [airQuality, microclimate, fireHotspots, occurrenceResult] = await Promise.all([
-    fetchAirQuality(lat, lon),
-    fetchMicroclimate(lat, lon),
-    fetchFireHotspots(lat, lon),
-    fetchBiodiversity(lat, lon),
-  ]);
+  const [airQuality, microclimate, fireHotspots, bioResult, aqiForecast, history] =
+    await Promise.all([
+      safe(fetchAirQuality(lat, lon), emptyAirQuality()),
+      safe(fetchMicroclimate(lat, lon), emptyMicroclimate()),
+      safe(fetchFireHotspots(lat, lon), []),
+      safe(fetchBiodiversity(lat, lon), {
+        species: [],
+        taxonomy: { groups: [], indicators: { present: false, bees: 0, butterflies: 0, amphibians: 0, total_sensitive: 0 } },
+      }),
+      safe(fetchAqiForecast(lat, lon), { forecast: [], aqi_yesterday_avg: null }),
+      safe(fetchHistoricalAverages(lat, lon), { temp_avg_30d: null, humidity_avg_30d: null }),
+    ]);
 
-  const enriched = await enrichSpecies(occurrenceResult);
+  const enriched = await enrichSpecies(bioResult.species);
 
   const payload: AggregatePayload = {
     location: { lat, lon, name },
@@ -54,6 +83,13 @@ export async function aggregateEnvironment(
     fire_hotspots: fireHotspots,
     biodiversity: enriched.species,
     total_occurrences: enriched.totalOccurrences,
+    aqi_forecast: aqiForecast.forecast,
+    history: {
+      aqi_yesterday_avg: aqiForecast.aqi_yesterday_avg,
+      temp_avg_30d: history.temp_avg_30d,
+      humidity_avg_30d: history.humidity_avg_30d,
+    },
+    taxonomy: bioResult.taxonomy,
   };
 
   await writeCache(rounded.lat, rounded.lon, payload);
@@ -65,7 +101,7 @@ export async function aggregateEnvironment(
  * Supabase `species_cache` table to avoid re-hitting the network.
  */
 async function enrichSpecies(
-  occurrences: GbifOccurrenceResult[],
+  occurrences: AggregatePayload["biodiversity"],
 ): Promise<{ species: AggregatePayload["biodiversity"]; totalOccurrences: number }> {
   const sb = getSupabase();
   const dbMeta = new Map<string, SpeciesMeta>();

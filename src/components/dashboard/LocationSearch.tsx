@@ -1,13 +1,8 @@
 import { useMemo, useState } from "react";
-import { Search, LocateFixed, Loader2, MapPin } from "lucide-react";
+import { Search, LocateFixed, Loader2, MapPin, Navigation } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fetchJson } from "@/lib/services/http";
-
-export interface SearchLocation {
-  lat: number;
-  lon: number;
-  name: string;
-}
+import type { SearchLocation } from "@/lib/types";
 
 interface GeoResult {
   name?: string;
@@ -19,6 +14,39 @@ interface GeoResult {
 
 const GEO_URL =
   "https://geocoding-api.open-meteo.com/v1/search?name={q}&count=6&language=en&format=json";
+
+interface ReverseGeo {
+  countryName?: string;
+  principalSubdivision?: string;
+  city?: string;
+  locality?: string;
+  neighbourhood?: string;
+}
+
+/**
+ * Reverse geocodes coordinates via BigDataCloud (keyless, CORS-enabled)
+ * to fill the admin hierarchy for the breadcrumb navigation.
+ */
+export async function reverseGeocode(
+  lat: number,
+  lon: number,
+): Promise<Partial<SearchLocation>> {
+  try {
+    const data = await fetchJson<ReverseGeo>(
+      `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}` +
+        `&longitude=${lon}&localityLanguage=en`,
+    );
+    return {
+      country: data.countryName,
+      admin1: data.principalSubdivision,
+      city: data.city,
+      locality: data.locality,
+      neighbourhood: data.neighbourhood,
+    };
+  } catch {
+    return {};
+  }
+}
 
 export default function LocationSearch({
   onSelect,
@@ -55,6 +83,9 @@ export default function LocationSearch({
                 lat: r.latitude!,
                 lon: r.longitude!,
                 name: [r.name, r.admin1, r.country].filter(Boolean).join(", "),
+                country: r.country,
+                admin1: r.admin1,
+                city: r.name,
               }));
             setResults(mapped);
             setOpen(true);
@@ -102,7 +133,7 @@ export default function LocationSearch({
 
       {current && (
         <div className="mt-1.5 flex items-center gap-1.5 px-2 font-mono text-[11px] text-cyan-300/90">
-          <MapPin className="h-3 w-3" />
+          <Navigation className="h-3 w-3" />
           {current.name} · {current.lat.toFixed(3)}, {current.lon.toFixed(3)}
         </div>
       )}

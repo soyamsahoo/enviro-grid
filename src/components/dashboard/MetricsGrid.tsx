@@ -34,7 +34,13 @@ export default function MetricsGrid({ payload }: { payload: AggregatePayload }) 
         value={formatNumber(aq.aqi)}
         sub={aq.aqi_category}
         accent={color}
-        badge={aq.stations > 0 ? `${aq.stations} stations` : undefined}
+        badge={
+          aq.source === "open-meteo"
+            ? "satellite model"
+            : aq.stations > 0
+              ? `${aq.stations} stations`
+              : undefined
+        }
       />
       <MetricCard
         icon={<Thermometer className="h-4 w-4" />}
