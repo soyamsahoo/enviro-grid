@@ -3,7 +3,7 @@ import maplibregl, { type Map as MapLibreMap, type GeoJSONSource } from "maplibr
 import "maplibre-gl/dist/maplibre-gl.css";
 import { cn } from "@/lib/utils";
 import type { AggregatePayload, SpeciesObservation } from "@/lib/types";
-import { fetchStationsWithLatest, aqiColor } from "@/lib/services/openaq";
+import { fetchStationsWithLatest, fetchAqiGrid, aqiColor } from "@/lib/services/openaq";
 import { fetchJson } from "@/lib/services/http";
 
 interface StationPoint {
@@ -67,6 +67,7 @@ export default function RadarMap({
     quake: true,
   });
   const [stations, setStations] = useState<StationPoint[]>([]);
+  const [grid, setGrid] = useState<Array<{ lat: number; lon: number; aqi: number | null }>>([]);
   const [quakes, setQuakes] = useState<GeoJSON.Feature<GeoJSON.Point>[]>([]);
   const [mapError, setMapError] = useState<string | null>(null);
   const [styleReady, setStyleReady] = useState(false);
@@ -179,6 +180,22 @@ export default function RadarMap({
     };
   }, [center.lat, center.lon]);
 
+  // --------------------------------------------- AQI grid fallback coverage
+  useEffect(() => {
+    let cancelled = false;
+    fetchAqiGrid(center.lat, center.lon)
+      .then((points) => {
+        if (cancelled) return;
+        setGrid(points);
+      })
+      .catch(() => {
+        /* grid is a visual fallback only */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [center.lat, center.lon]);
+
   // ------------------------------------------------------- derive geo sources
   const geojson = useMemo(() => {
     const fireFeatures = (payload?.fire_hotspots ?? []).map((f) => ({
@@ -191,6 +208,12 @@ export default function RadarMap({
       type: "Feature" as const,
       properties: { name: s.name, aqi: s.aqi, pm25: s.pm25 },
       geometry: { type: "Point" as const, coordinates: [s.lon, s.lat] },
+    }));
+
+    const gridFeatures = grid.map((g) => ({
+      type: "Feature" as const,
+      properties: { aqi: g.aqi },
+      geometry: { type: "Point" as const, coordinates: [g.lon, g.lat] },
     }));
 
     const bioFeatures = (payload?.biodiversity ?? []).slice(0, 25).map((s, i) => ({
@@ -219,10 +242,11 @@ export default function RadarMap({
     return {
       fire: { type: "FeatureCollection" as const, features: fireFeatures },
       stations: { type: "FeatureCollection" as const, features: stationFeatures },
+      grid: { type: "FeatureCollection" as const, features: gridFeatures },
       bio: { type: "FeatureCollection" as const, features: bioFeatures },
       quakes: { type: "FeatureCollection" as const, features: quakeFeatures },
     };
-  }, [payload, stations, quakes, center]);
+  }, [payload, stations, grid, quakes, center]);
 
   // ------------------------------------------------------------- layer sync
   useEffect(() => {
@@ -242,6 +266,7 @@ export default function RadarMap({
 
     syncSource(map, "fire-source", geojson.fire);
     syncSource(map, "station-source", geojson.stations);
+    syncSource(map, "grid-source", geojson.grid);
     syncSource(map, "bio-source", geojson.bio);
     syncSource(map, "quake-source", geojson.quakes);
 
@@ -261,6 +286,8 @@ export default function RadarMap({
     set("satellite", vis.sat);
     set("fire-pulse", vis.fire);
     set("fire-core", vis.fire);
+    // Modeled AQI grid fills the map when physical stations are sparse.
+    set("aqi-grid", vis.aqi && stations.length < 3);
     set("aqi-circle", vis.aqi);
     set("aqi-outline", vis.aqi);
     set("aqi-heat", vis.heat);
@@ -274,6 +301,7 @@ export default function RadarMap({
   function addBaseLayers(map: MapLibreMap, center: { lat: number; lon: number }) {
     map.addSource("fire-source", { type: "geojson", data: geojson.fire });
     map.addSource("station-source", { type: "geojson", data: geojson.stations });
+    map.addSource("grid-source", { type: "geojson", data: geojson.grid });
     map.addSource("bio-source", {
       type: "geojson",
       data: geojson.bio,
@@ -314,6 +342,20 @@ export default function RadarMap({
     });
 
     // Layer 1 — AQI stations
+    map.addLayer({
+      id: "aqi-grid",
+      type: "circle",
+      source: "grid-source",
+      layout: { visibility: "none" },
+      paint: {
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], 6, 9, 11, 14],
+        "circle-color": ["get", "aqi"],
+        "circle-opacity": 0.4,
+        "circle-stroke-width": 0.5,
+        "circle-stroke-color": ["get", "aqi"],
+        "circle-stroke-opacity": 0.5,
+      },
+    });
     map.addLayer({
       id: "aqi-outline",
       type: "circle",
@@ -606,6 +648,9 @@ export default function RadarMap({
           </div>
           <div className="flex items-center gap-2">
             <span className="h-2.5 w-2.5 rounded-full bg-cyan-400" /> OpenAQ AQI
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="h-2.5 w-2.5 rounded-full bg-slate-400" /> Modeled AQI grid
           </div>
           <div className="flex items-center gap-2">
             <span className="h-2.5 w-2.5 rounded-full bg-violet-400" /> USGS quakes

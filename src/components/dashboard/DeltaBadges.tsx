@@ -48,7 +48,8 @@ export default function DeltaBadges({ payload }: { payload: AggregatePayload }) 
       </div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         {visible.map((d) => {
-          const diff = d.current! - d.baseline!;
+          const raw = d.current! - d.baseline!;
+          const diff = Math.abs(raw) < 0.05 ? 0 : raw; // avoid "-0" artifacts
           const worse = d.lowerIsBetter ? diff > 0 : false;
           const better = d.lowerIsBetter ? diff < 0 : false;
           return (

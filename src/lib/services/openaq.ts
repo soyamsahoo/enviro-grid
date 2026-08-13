@@ -360,3 +360,43 @@ export function aqiColor(aqi: number | null): string {
   if (aqi <= 300) return "#8B5CF6";
   return "#7F1D1D";
 }
+
+/**
+ * Continuous AQI coverage grid around a point (Open-Meteo AQ model,
+ * keyless). Used as a map fallback so the radar view always has data
+ * density even when no physical OpenAQ station is nearby. A single
+ * multi-point request returns `current` as an array (one entry per point).
+ */
+export async function fetchAqiGrid(
+  lat: number,
+  lon: number,
+  steps = 7,
+  stepDeg = 0.4,
+): Promise<Array<{ lat: number; lon: number; aqi: number | null }>> {
+  try {
+    const lats: number[] = [];
+    const lons: number[] = [];
+    const half = (steps - 1) / 2;
+    for (let i = 0; i < steps; i++) {
+      for (let j = 0; j < steps; j++) {
+        lats.push(lat + (i - half) * stepDeg);
+        lons.push(lon + (j - half) * stepDeg);
+      }
+    }
+    const data = await fetchJson<{
+      current?: Array<{ us_aqi?: number | null }>;
+    }>(
+      `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lats.join(",")}` +
+        `&longitude=${lons.join(",")}&current=us_aqi`,
+    );
+    const currents = Array.isArray(data.current) ? data.current : [];
+    return lats.map((la, i) => ({
+      lat: la,
+      lon: lons[i],
+      aqi: currents[i]?.us_aqi ?? null,
+    }));
+  } catch (err) {
+    console.warn("[aq] AQI grid fallback unavailable:", err);
+    return [];
+  }
+}

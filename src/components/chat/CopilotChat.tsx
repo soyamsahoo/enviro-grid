@@ -59,7 +59,7 @@ export default function CopilotChat({
         ...m,
         {
           role: "assistant",
-          content: `The AI copilot is unavailable (${err instanceof Error ? err.message : "error"}). Add VITE_LLM_API_KEY to .env to enable chat.`,
+          content: `The AI copilot is unavailable: ${err instanceof Error ? err.message : "unknown error"}. Make sure LLM_API_KEY is set (VITE_LLM_API_KEY in local .env, or LLM_API_KEY on Vercel).`,
           error: true,
         },
       ]);

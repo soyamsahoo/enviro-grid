@@ -47,7 +47,12 @@ export default function BreadcrumbNav({
       if (key === "global") return "Global Earth";
       return (hierarchy as unknown as Record<string, string | undefined>)[key] ?? null;
     };
-    return HIERARCHY_KEYS.map((key) => ({ key, label: entry(key) })).filter((l) => l.label);
+    // Dedupe consecutive identical labels (e.g. reverse geocoders often
+    // repeat the city name for both "city" and "locality").
+    const levels = HIERARCHY_KEYS.map((key) => ({ key, label: entry(key) })).filter(
+      (l) => l.label,
+    );
+    return levels.filter((l, i) => i === 0 || l.label !== levels[i - 1].label);
   }, [hierarchy]);
 
   const [resolving, setResolving] = useState<string | null>(null);
@@ -67,6 +72,8 @@ export default function BreadcrumbNav({
       const loc = await resolveCentroid(key, label, hierarchy);
       if (loc) onSelect(loc);
     } catch {
+      /* geocoding failure is non-fatal; just stop the spinner */
+    } finally {
       setResolving(null);
     }
   };

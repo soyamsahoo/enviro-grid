@@ -72,8 +72,8 @@ export const PERSONA_PROFILES: Record<PersonaId, PersonaProfile> = {
     shortLabel: "Citizen",
     description: "Daily urban living baseline",
     weights: {
-      pm25: 0.1, pm10: 0, aqi: 0.3, heatIndex: 0, humidity: 0,
-      uv: 0.2, rain: 0, temperature: 0.3, fire: 0.2, biodiversity: 0,
+      pm25: 0.1, pm10: 0.05, aqi: 0.25, heatIndex: 0.25, humidity: 0.15,
+      uv: 0.1, rain: 0.05, temperature: 0.1, fire: 0.1, biodiversity: 0,
     },
   },
 };

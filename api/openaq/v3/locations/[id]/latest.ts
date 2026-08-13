@@ -1,31 +1,35 @@
 /**
- * Vercel serverless proxy for the OpenAQ v3 API.
- * Injects the server-side API key so it never ships in the client bundle.
- *
- * Env: OPENAQ_API_KEY (or VITE_OPENAQ_API_KEY) — set in the Vercel dashboard.
+ * Vercel serverless proxy for OpenAQ v3 /locations/{id}/latest.
+ * File mirrors the URL: /api/openaq/v3/locations/{id}/latest.
  */
 const UPSTREAM = "https://api.openaq.org";
 
 export default async function handler(req: {
   method: string;
   headers: Record<string, string | string[] | undefined>;
-  url?: string;
+  query: Record<string, string | string[] | undefined>;
 }, res: {
   status: (code: number) => { json: (body: unknown) => void };
 }) {
-  const path = (req.url ?? "").replace(/^\/api\/openaq/, "");
+  const clientKey = req.headers["x-api-key"];
   const key =
     process.env.OPENAQ_API_KEY ||
     process.env.VITE_OPENAQ_API_KEY ||
-    (typeof req.headers["x-api-key"] === "string" ? req.headers["x-api-key"] : "");
+    (typeof clientKey === "string" ? clientKey : "");
 
   if (!key) {
     res.status(500).json({ error: "OPENAQ_API_KEY not configured on the server" });
     return;
   }
 
+  const id = typeof req.query.id === "string" ? req.query.id : "";
+  if (!/^\d+$/.test(id)) {
+    res.status(400).json({ error: "invalid station id" });
+    return;
+  }
+
   try {
-    const upstream = await fetch(`${UPSTREAM}${path}`, {
+    const upstream = await fetch(`${UPSTREAM}/v3/locations/${id}/latest`, {
       method: req.method,
       headers: {
         "X-API-Key": key,

@@ -52,10 +52,11 @@ function groupKey(kingdom: string | null, class_: string | null): string {
 }
 
 /**
- * Query GBIF occurrence records within `radiusMeters` (default 15 km).
- * Returns unique species aggregated by count plus a taxonomic breakdown
- * (Birds / Mammals / Plants / …) and bio-indicator counts
- * (bees = Hymenoptera, butterflies = Lepidoptera, amphibians).
+ * Query GBIF occurrence records around a point.
+ * NOTE: GBIF's `radius` param silently returns 0 results in the current
+ * API version, so we query a bounding box derived from the radius instead
+ * (equivalent coverage, works reliably). If the box is empty, the radius
+ * is widened once (25 km) as a fallback.
  */
 export async function fetchBiodiversity(
   lat: number,
@@ -63,12 +64,29 @@ export async function fetchBiodiversity(
   radiusMeters = 15000,
   limit = 300,
 ): Promise<BiodiversityResult> {
+  let data = await searchBox(lat, lon, radiusMeters, limit);
+  if ((data.count ?? 0) === 0) {
+    data = await searchBox(lat, lon, 25000, limit);
+  }
+  return buildResult(data);
+}
+
+async function searchBox(
+  lat: number,
+  lon: number,
+  radiusMeters: number,
+  limit: number,
+): Promise<GbifSearchResponse> {
+  const degLat = radiusMeters / 111320;
+  const degLon = radiusMeters / (111320 * Math.max(0.2, Math.cos((lat * Math.PI) / 180)));
   const url =
-    `${BASE}/occurrence/search?decimalLatitude=${lat}&decimalLongitude=${lon}` +
-    `&radius=${radiusMeters}&limit=${limit}&hasCoordinate=true`;
+    `${BASE}/occurrence/search?decimalLatitude=${(lat - degLat).toFixed(4)},${(lat + degLat).toFixed(4)}` +
+    `&decimalLongitude=${(lon - degLon).toFixed(4)},${(lon + degLon).toFixed(4)}` +
+    `&limit=${limit}&hasCoordinate=true`;
+  return fetchJson<GbifSearchResponse>(url);
+}
 
-  const data = await fetchJson<GbifSearchResponse>(url);
-
+function buildResult(data: GbifSearchResponse): BiodiversityResult {
   const speciesMap = new Map<string, { count: number; gbifKey?: number }>();
   const groupCounts = new Map<string, number>();
   let bees = 0;
