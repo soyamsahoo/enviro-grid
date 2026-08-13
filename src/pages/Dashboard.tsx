@@ -39,9 +39,9 @@ import CopilotChat from "@/components/chat/CopilotChat";
 import AlertsModal, { evaluateAlerts } from "@/components/alerts/AlertsModal";
 
 const DEFAULT_LOCATION: SearchLocation = {
-  lat: 40.7128,
-  lon: -74.006,
-  name: "New York, NY, United States",
+  lat: 28.6139,
+  lon: 77.209,
+  name: "New Delhi, Delhi, India",
 };
 
 export default function Dashboard() {
@@ -108,13 +108,15 @@ export default function Dashboard() {
     staleTime: 10 * 60 * 1000,
   });
 
+  // Default demo corridor: New Delhi → Noida (one of India's most
+  // polluted commutes) so the inhaled-dose demo opens with real numbers.
   const [origin, setOrigin] = useState<LatLng>(() => ({
-    lat: location.lat,
-    lon: location.lon - 0.012,
+    lat: 28.6139,
+    lon: 77.209,
   }));
   const [destination, setDestination] = useState<LatLng>(() => ({
-    lat: location.lat + 0.006,
-    lon: location.lon + 0.012,
+    lat: 28.5355,
+    lon: 77.391,
   }));
 
   // Reset pins when the user searches a new place.
