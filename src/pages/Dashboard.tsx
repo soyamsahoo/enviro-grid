@@ -411,6 +411,7 @@ export default function Dashboard() {
               routeCoords={route?.coords}
               routeMeta={route}
               routeLoading={routeLoading}
+              onOpenRoutes={() => setRoutesOpen(true)}
             />
             <DeltaBadges payload={payload ?? emptyPayload()} />
           </div>
@@ -495,6 +496,10 @@ export default function Dashboard() {
         onClose={() => setRoutesOpen(false)}
         routeMeta={route}
         routeLoading={routeLoading}
+        origin={origin}
+        destination={destination}
+        onOriginChange={setOrigin}
+        onDestinationChange={setDestination}
       />
       <CopilotChat payload={payload} persona={persona} />
     </div>

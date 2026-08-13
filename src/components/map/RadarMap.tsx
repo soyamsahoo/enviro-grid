@@ -57,6 +57,7 @@ export default function RadarMap({
   routeCoords,
   routeMeta,
   routeLoading,
+  onOpenRoutes,
 }: {
   payload: AggregatePayload | null;
   center: { lat: number; lon: number };
@@ -69,6 +70,7 @@ export default function RadarMap({
   routeCoords?: LatLng[];
   routeMeta?: RouteResult | null;
   routeLoading?: boolean;
+  onOpenRoutes?: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -698,7 +700,11 @@ export default function RadarMap({
         {toggleButton("Biodiversity", layers.bio, () => setLayers((l) => ({ ...l, bio: !l.bio })), "bg-cyan-500/20 text-cyan-300 border-cyan-500/40")}
         {toggleButton("Disasters", layers.quake, () => setLayers((l) => ({ ...l, quake: !l.quake })), "bg-violet-500/20 text-violet-300 border-violet-500/40")}
       </div>
-      <div className="absolute right-3 top-3 rounded-lg border border-emerald-500/30 bg-grid-bg/85 px-3 py-2 backdrop-blur">
+      <button
+        onClick={onOpenRoutes}
+        className="absolute right-3 top-3 rounded-lg border border-emerald-500/30 bg-grid-bg/85 px-3 py-2 text-left backdrop-blur transition-colors hover:border-emerald-500/60"
+        title="Change route"
+      >
         {routeLoading ? (
           <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-slate-400">
             <span className="h-3 w-3 animate-spin rounded-full border-2 border-emerald-400 border-t-transparent" />
@@ -713,11 +719,11 @@ export default function RadarMap({
             <div className="mt-0.5 flex items-center gap-2 text-slate-400">
               <span className="h-1.5 w-1.5 rounded-full bg-rose-400" /> PM2.5{" "}
               {routeMeta.avgPm25 === null ? "n/a" : `${formatNumber(routeMeta.avgPm25, 1)} µg/m³`}
-              <span className="text-slate-600">· drag pins</span>
+              <span className="text-slate-600">· change route</span>
             </div>
           </div>
         ) : null}
-      </div>
+      </button>
       <div className="absolute bottom-3 left-3 rounded-lg border border-grid-border bg-grid-bg/80 p-2.5 backdrop-blur">
         <div className="space-y-1 font-mono text-[10px] uppercase tracking-widest text-slate-400">
           <div className="flex items-center gap-2">
