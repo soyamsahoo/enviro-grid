@@ -5,6 +5,7 @@ import {
   Thermometer,
   Flame,
   Activity,
+  CloudRain,
 } from "lucide-react";
 import type { AggregatePayload } from "@/lib/types";
 import { Card, CardContent } from "@/components/ui/card";
@@ -67,7 +68,12 @@ export default function MetricsGrid({ payload }: { payload: AggregatePayload }) 
         icon={<Wind className="h-4 w-4" />}
         label="Wind Speed"
         value={mc.wind_speed_10m === null ? "—" : `${formatNumber(mc.wind_speed_10m, 1)} km/h`}
-        sub={mc.precipitation_probability === null ? undefined : `☔ ${formatNumber(mc.precipitation_probability)}% rain`}
+        sub={mc.precipitation_probability === null ? undefined : (
+          <span className="flex items-center gap-1">
+            <CloudRain className="h-3 w-3 text-cyan-400" />
+            {formatNumber(mc.precipitation_probability)}% rain
+          </span>
+        )}
         accent="#34D399"
       />
       <MetricCard
@@ -109,14 +115,23 @@ function MetricCard({
   icon: React.ReactNode;
   label: string;
   value: string;
-  sub?: string;
+  sub?: React.ReactNode;
   accent: string;
   badge?: string;
   pulse?: boolean;
 }) {
   return (
-    <Card className="overflow-hidden transition-colors hover:border-slate-600">
-      <CardContent className="p-4">
+    <Card className="group relative overflow-hidden border-grid-border transition-all hover:-translate-y-0.5 hover:border-slate-600 hover:shadow-xl">
+      {/* ambient blob + hairline */}
+      <div
+        className="pointer-events-none absolute -right-6 -top-6 h-20 w-20 rounded-full opacity-50 blur-2xl transition-opacity group-hover:opacity-100"
+        style={{ background: `${accent}22` }}
+      />
+      <div
+        className="h-px w-full"
+        style={{ background: `linear-gradient(90deg, transparent, ${accent}99, transparent)` }}
+      />
+      <CardContent className="relative p-4">
         <div className="flex items-center justify-between">
           <span className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-slate-500">
             <span style={{ color: accent }}>{icon}</span>
@@ -128,7 +143,10 @@ function MetricCard({
             </Badge>
           )}
         </div>
-        <div className="mt-2.5 font-display text-2xl font-semibold tabular-nums text-slate-50">
+        <div
+          className="mt-2.5 font-display text-2xl font-semibold tabular-nums text-slate-50"
+          style={{ textShadow: `0 0 20px ${accent}44` }}
+        >
           {value}
         </div>
         {sub && <div className="mt-0.5 text-xs text-slate-400">{sub}</div>}
