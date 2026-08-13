@@ -9,11 +9,11 @@ import {
   Leaf,
   Loader2,
   Radar,
+  Route,
   Satellite,
 } from "lucide-react";
 import type { PersonaId } from "@/lib/ai/personas";
 import type { AggregatePayload, AlertRule, SearchLocation } from "@/lib/types";
-import { PERSONA_PROFILES } from "@/lib/ai/personas";
 import { generatePersonaScore } from "@/lib/ai/copilot";
 import { aggregateEnvironment, recordSearch } from "@/lib/services/apiAggregator";
 import { isSupabaseConfigured, checkSupabaseTables } from "@/lib/services/supabase";
@@ -24,7 +24,8 @@ import LocationSearch from "@/components/dashboard/LocationSearch";
 import BreadcrumbNav from "@/components/dashboard/BreadcrumbNav";
 import PersonaSelector from "@/components/dashboard/PersonaSelector";
 import RadarMap from "@/components/map/RadarMap";
-import ScoreGauge from "@/components/score/ScoreGauge";
+import ExposureCard from "@/components/score/ExposureCard";
+import RouteDrawer from "@/components/routes/RouteDrawer";
 import VerifiedWhyCard from "@/components/dashboard/VerifiedWhyCard";
 import MetricsGrid from "@/components/dashboard/MetricsGrid";
 import BiodiversityCarousel from "@/components/dashboard/BiodiversityCarousel";
@@ -46,6 +47,7 @@ export default function Dashboard() {
   const [persona, setPersona] = useState<PersonaId>("general_citizen");
   const [locating, setLocating] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
+  const [routesOpen, setRoutesOpen] = useState(false);
 
   const [supabaseInfo, setSupabaseInfo] = useState<{
     configured: boolean;
@@ -128,7 +130,6 @@ export default function Dashboard() {
     );
   }, []);
 
-  const profile = PERSONA_PROFILES[persona];
   const loading = envQuery.isLoading;
   const isDemo =
     !isSupabaseConfigured() ||
@@ -219,6 +220,14 @@ export default function Dashboard() {
               current={location}
               locating={locating}
             />
+            <button
+              onClick={() => setRoutesOpen(true)}
+              className="flex h-9 items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 text-xs font-medium text-emerald-300 transition-colors hover:bg-emerald-500/20"
+              title="Compare routes by inhaled dose"
+            >
+              <Route className="h-4 w-4" />
+              <span className="hidden sm:inline">Routes</span>
+            </button>
             <button
               onClick={() => setAlertsOpen(true)}
               className="relative flex h-9 w-9 items-center justify-center rounded-lg border border-grid-border bg-grid-panel2 text-slate-400 transition-colors hover:text-emerald-300"
@@ -316,19 +325,13 @@ export default function Dashboard() {
 
         {/* ------------------------------------------------- hero + why */}
         <section className="grid gap-4 lg:grid-cols-[320px_1fr]">
-          <div className="glass flex flex-col items-center justify-center rounded-xl p-6">
-            <ScoreGauge
-              score={copilotQuery.data?.score.persona_health_score ?? null}
-              riskLevel={copilotQuery.data?.score.risk_level}
-              loading={loading || copilotQuery.isLoading}
-            />
-            <div className="mt-3 text-center">
-              <div className="font-display text-sm font-medium text-slate-200">
-                {profile.label}
-              </div>
-              <div className="mt-0.5 text-xs text-slate-500">{profile.description}</div>
-            </div>
-          </div>
+          <ExposureCard
+            pm25={payload?.air_quality.pm25 ?? null}
+            persona={persona}
+            score={copilotQuery.data?.score.persona_health_score ?? null}
+            riskLevel={copilotQuery.data?.score.risk_level}
+            loading={loading || copilotQuery.isLoading}
+          />
 
           <div className="flex flex-col gap-4">
             <VerifiedWhyCard
@@ -427,6 +430,12 @@ export default function Dashboard() {
           onClose={() => setAlertsOpen(false)}
         />
       )}
+      <RouteDrawer
+        payload={payload}
+        persona={persona}
+        open={routesOpen}
+        onClose={() => setRoutesOpen(false)}
+      />
       <CopilotChat payload={payload} persona={persona} />
     </div>
   );
