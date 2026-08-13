@@ -17,16 +17,61 @@ interface GeoHit {
   longitude: number;
   country?: string;
   admin1?: string;
+  /** Full formatted address line (Nominatim display_name). */
+  full?: string;
+  /** OSM feature type: building, road, neighbourhood, city… */
+  type?: string;
+}
+
+interface NominatimItem {
+  name?: string;
+  lat?: string;
+  lon?: string;
+  display_name?: string;
+  type?: string;
+  address?: { state?: string; county?: string; country?: string };
 }
 
 const GEO_URL =
   "https://geocoding-api.open-meteo.com/v1/search?name={q}&count=6&language=en&format=json";
 
+const NOMINATIM_URL =
+  "https://nominatim.openstreetmap.org/search?q={q}&format=jsonv2&addressdetails=1&limit=6&accept-language=en";
+
+/** Full-address forward geocoding: Nominatim (OSM) with Open-Meteo fallback. */
+async function searchPlaces(q: string): Promise<GeoHit[]> {
+  try {
+    const items = await fetchJson<NominatimItem[]>(
+      NOMINATIM_URL.replace("{q}", encodeURIComponent(q.trim())),
+    );
+    if (items.length > 0) {
+      return items.map((item) => ({
+        name: item.name ?? (item.display_name ?? q).split(",")[0],
+        latitude: parseFloat(item.lat ?? "0"),
+        longitude: parseFloat(item.lon ?? "0"),
+        admin1: item.address?.state ?? item.address?.county ?? "",
+        country: item.address?.country ?? "",
+        full: item.display_name,
+        type: item.type,
+      }));
+    }
+  } catch {
+    /* fall through to Open-Meteo */
+  }
+  const data = await fetchJson<{ results?: GeoHit[] }>(
+    GEO_URL.replace("{q}", encodeURIComponent(q.trim())),
+  );
+  return (data.results ?? []).map((h) => ({ ...h, full: hitLabel(h) }));
+}
+
 function coordLabel(p: LatLng): string {
   return `${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}`;
 }
 
+const COORD_RE = /^-?\d+(\.\d+)?,\s*-?\d+(\.\d+)?$/;
+
 function hitLabel(h: GeoHit): string {
+  if (h.full) return h.full;
   const region = [h.admin1, h.country].filter(Boolean).join(", ");
   return region ? `${h.name}, ${region}` : h.name;
 }
@@ -82,7 +127,7 @@ export default function RouteForm({
 
   const query = activeField === "from" ? fromText : toText;
 
-  // Debounced geocoding autocomplete
+  // Debounced geocoding autocomplete (full addresses via Nominatim/OSM)
   useEffect(() => {
     if (activeField === null || query.trim().length < 2) {
       setHits([]);
@@ -93,16 +138,14 @@ export default function RouteForm({
     setSearching(true);
     const t = setTimeout(async () => {
       try {
-        const data = await fetchJson<{ results?: GeoHit[] }>(
-          GEO_URL.replace("{q}", encodeURIComponent(query.trim())),
-        );
-        if (!cancelled) setHits(data.results ?? []);
+        const results = await searchPlaces(query);
+        if (!cancelled) setHits(results);
       } catch {
         if (!cancelled) setHits([]);
       } finally {
         if (!cancelled) setSearching(false);
       }
-    }, 400);
+    }, 500);
     return () => {
       cancelled = true;
       clearTimeout(t);
@@ -182,7 +225,10 @@ export default function RouteForm({
               onChange(e.target.value);
               setActiveField(side);
             }}
-            onFocus={() => setActiveField(side)}
+            onFocus={(e) => {
+              setActiveField(side);
+              if (COORD_RE.test(value)) e.target.select();
+            }}
             onBlur={() => window.setTimeout(() => setActiveField((f) => (f === side ? null : f)), 150)}
             onKeyDown={onKeyDown}
             placeholder={placeholder}
@@ -200,9 +246,9 @@ export default function RouteForm({
               variant === "overlay" && "bottom-full mt-0 mb-1",
             )}
           >
-            {hits.slice(0, 5).map((h) => (
+            {hits.slice(0, 6).map((h) => (
               <button
-                key={h.latitude + "," + h.longitude + h.name}
+                key={h.latitude + "," + h.longitude + h.name + (h.full ?? "")}
                 onMouseDown={(e) => {
                   e.preventDefault();
                   select(side, h);
@@ -210,10 +256,17 @@ export default function RouteForm({
                 className="flex w-full items-start gap-2 px-3 py-2 text-left transition-colors hover:bg-emerald-500/10"
               >
                 <Search className="mt-0.5 h-3 w-3 shrink-0 text-slate-500" />
-                <span className="min-w-0">
-                  <span className="block truncate text-xs text-slate-100">{h.name}</span>
-                  <span className="block truncate font-mono text-[9px] uppercase tracking-wider text-slate-500">
-                    {[h.admin1, h.country].filter(Boolean).join(" · ")}
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1.5">
+                    <span className="truncate text-xs font-medium text-slate-100">{h.name}</span>
+                    {h.type && (
+                      <span className="shrink-0 rounded bg-grid-panel2 px-1 py-px font-mono text-[8px] uppercase tracking-wider text-slate-500">
+                        {h.type}
+                      </span>
+                    )}
+                  </span>
+                  <span className="block truncate font-mono text-[9px] text-slate-500">
+                    {h.full ?? [h.admin1, h.country].filter(Boolean).join(" · ")}
                   </span>
                 </span>
                 <span className="ml-auto shrink-0 font-mono text-[9px] text-slate-600">
