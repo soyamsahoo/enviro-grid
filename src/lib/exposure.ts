@@ -55,7 +55,7 @@ export function cigaretteEquivalent(massUg: number | null): number | null {
 }
 
 export interface RouteOption {
-  key: "fastest" | "cleanest";
+  key: "fastest" | "cleanest" | "dangerous";
   label: string;
   minutes: number;
   pm25: number;
@@ -67,17 +67,24 @@ export interface RouteOption {
   accent: { chip: string; bar: string; text: string };
 }
 
+/** Which corridor the rider cares about — controls map color + drawer focus. */
+export type RouteMode = "fastest" | "cleanest" | "dangerous";
+
 export interface RouteComparison {
   ventilation: { label: string; m3perMin: number };
   activityMinutes: number;
   routeA: RouteOption;
   routeB: RouteOption;
+  /** Hotspot-corridor variant (only when mode === "dangerous"). */
+  routeD?: RouteOption;
   /** How much cleaner Route B is vs Route A (0–100%). */
   exposureReductionPct: number;
   /** Extra minutes Route B costs vs Route A. */
   extraMinutes: number;
   /** Modeled clean-corridor factor (Route B PM = factor × Route A PM). */
   cleanFactor: number;
+  /** Modeled hotspot-corridor factor (Route D PM = factor × Route A PM). */
+  dangerFactor: number;
 }
 
 export interface RouteComputeOpts {
@@ -89,6 +96,10 @@ export interface RouteComputeOpts {
   minutesA?: number;
   /** Clean-corridor factor (default 0.18 → ~82% less exposure). */
   cleanFactor?: number;
+  /** Hotspot-corridor factor (default 1.65 → +65% exposure). */
+  dangerFactor?: number;
+  /** Which corridor to focus the comparison on. */
+  mode?: RouteMode;
 }
 
 /**
@@ -100,7 +111,7 @@ export interface RouteComputeOpts {
  *    air-quality model estimates cleanFactor × street PM2.5 (default 0.18,
  *    i.e. ~82% less exposure) but costs +3 minutes.
  *
- * Every input (activity, minutes, street PM2.5) flows through the dose
+ * Every input (activity, minutes, street PM2.5, mode) flows through the dose
  * equation, so toggles and route drags recompute cigarettes live.
  */
 export function computeRoutes(
@@ -118,6 +129,8 @@ export function computeRoutes(
     : VENTILATION_RATES[personaId];
   const minutesA = opts.minutesA ?? activityMinutes;
   const cleanFactor = opts.cleanFactor ?? 0.18;
+  const dangerFactor = opts.dangerFactor ?? 1.65;
+  const mode = opts.mode ?? "fastest";
 
   const cleanPm = Math.max(1, Math.round(streetPm * cleanFactor));
   const extraMinutes = 3;
@@ -153,6 +166,21 @@ export function computeRoutes(
     bar: "from-emerald-400 to-teal-500",
     text: "text-emerald-300",
   });
+  const routeD =
+    mode === "dangerous"
+      ? build(
+          "dangerous",
+          "Dangerous route",
+          minutesA,
+          Math.round(streetPm * dangerFactor),
+          "#EF4444",
+          {
+            chip: "border-red-500/40 bg-red-500/10 text-red-300",
+            bar: "from-red-500 to-orange-600",
+            text: "text-red-400",
+          },
+        )
+      : undefined;
 
   const exposureReductionPct = routeA.cigarettes > 0
     ? Math.round(((routeA.cigarettes - routeB.cigarettes) / routeA.cigarettes) * 100)
@@ -163,8 +191,10 @@ export function computeRoutes(
     activityMinutes,
     routeA,
     routeB,
+    routeD,
     exposureReductionPct,
     extraMinutes,
     cleanFactor,
+    dangerFactor,
   };
 }

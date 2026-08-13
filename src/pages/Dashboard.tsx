@@ -4,15 +4,20 @@ import {
   AlertTriangle,
   Bell,
   BrainCircuit,
+  Check,
   Database,
   Download,
+  Flame,
   Leaf,
   Loader2,
+  MoreHorizontal,
   Radar,
   Route,
   Satellite,
+  Zap,
 } from "lucide-react";
 import type { PersonaId } from "@/lib/ai/personas";
+import type { RouteMode } from "@/lib/exposure";
 import type { AggregatePayload, AlertRule, SearchLocation } from "@/lib/types";
 import { generatePersonaScore } from "@/lib/ai/copilot";
 import { aggregateEnvironment, recordSearch } from "@/lib/services/apiAggregator";
@@ -20,7 +25,7 @@ import { fetchAqiGrid } from "@/lib/services/openaq";
 import { avgPm25AlongRoute, fetchRoute, type LatLng, type RouteResult } from "@/lib/routing";
 import { isSupabaseConfigured, checkSupabaseTables } from "@/lib/services/supabase";
 import { reverseGeocode } from "@/components/dashboard/LocationSearch";
-import { timeAgo } from "@/lib/utils";
+import { cn, timeAgo } from "@/lib/utils";
 import { exportSnapshotCSV, exportSnapshotJSON, exportSnapshotPDF } from "@/lib/export";
 import LocationSearch from "@/components/dashboard/LocationSearch";
 import BreadcrumbNav from "@/components/dashboard/BreadcrumbNav";
@@ -50,6 +55,8 @@ export default function Dashboard() {
   const [locating, setLocating] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
   const [routesOpen, setRoutesOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [routeMode, setRouteMode] = useState<RouteMode>("fastest");
 
   const [supabaseInfo, setSupabaseInfo] = useState<{
     configured: boolean;
@@ -294,6 +301,85 @@ export default function Dashboard() {
             </button>
             <div className="relative">
               <button
+                onClick={() => setMoreOpen((v) => !v)}
+                className="flex h-9 items-center gap-1.5 rounded-lg border border-grid-border bg-grid-panel2 px-3 text-slate-400 transition-colors hover:text-emerald-300"
+                title="Route modes"
+              >
+                <MoreHorizontal className="h-4 w-4" />
+                <span className="hidden text-xs sm:inline">More</span>
+              </button>
+              {moreOpen && (
+                <>
+                  <div className="fixed inset-0 z-20" onClick={() => setMoreOpen(false)} />
+                  <div className="absolute right-0 top-full z-30 mt-1 w-56 overflow-hidden rounded-xl border border-grid-border bg-grid-panel shadow-2xl">
+                    <div className="px-3 pb-1 pt-2.5 font-mono text-[9px] uppercase tracking-widest text-slate-500">
+                      Route mode
+                    </div>
+                    {(
+                      [
+                        {
+                          mode: "fastest" as RouteMode,
+                          label: "Fastest route",
+                          desc: "Shortest time · street PM2.5",
+                          icon: <Zap className="h-3.5 w-3.5" />,
+                        },
+                        {
+                          mode: "cleanest" as RouteMode,
+                          label: "Cleanest route",
+                          desc: "Least inhaled dose · green corridor",
+                          icon: <Leaf className="h-3.5 w-3.5" />,
+                        },
+                        {
+                          mode: "dangerous" as RouteMode,
+                          label: "Dangerous route",
+                          desc: "Hotspot corridor · worst exposure",
+                          icon: <Flame className="h-3.5 w-3.5" />,
+                        },
+                      ] as const
+                    ).map((item) => (
+                      <button
+                        key={item.mode}
+                        onClick={() => {
+                          setRouteMode(item.mode);
+                          setMoreOpen(false);
+                          setRoutesOpen(true);
+                        }}
+                        className={cn(
+                          "flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-secondary",
+                          routeMode === item.mode ? "bg-emerald-500/10" : "",
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border",
+                            item.mode === "fastest"
+                              ? "border-rose-500/40 bg-rose-500/10 text-rose-300"
+                              : item.mode === "cleanest"
+                                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                                : "border-red-500/40 bg-red-500/10 text-red-300",
+                          )}
+                        >
+                          {item.icon}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="flex items-center gap-1.5 text-xs font-medium text-slate-100">
+                            {item.label}
+                            {routeMode === item.mode && (
+                              <Check className="h-3 w-3 text-emerald-400" />
+                            )}
+                          </span>
+                          <span className="block truncate font-mono text-[9px] uppercase tracking-wider text-slate-500">
+                            {item.desc}
+                          </span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="relative">
+              <button
                 className="flex h-9 items-center gap-1.5 rounded-lg border border-grid-border bg-grid-panel2 px-3 text-slate-400 transition-colors hover:text-emerald-300"
                 title="Export snapshot"
               >
@@ -413,6 +499,7 @@ export default function Dashboard() {
               routeCoords={route?.coords}
               routeMeta={route}
               routeLoading={routeLoading}
+              routeMode={routeMode}
               onOpenRoutes={() => setRoutesOpen(true)}
             />
             <DeltaBadges payload={payload ?? emptyPayload()} />
@@ -498,6 +585,7 @@ export default function Dashboard() {
         onClose={() => setRoutesOpen(false)}
         routeMeta={route}
         routeLoading={routeLoading}
+        mode={routeMode}
       />
       <CopilotChat payload={payload} persona={persona} />
     </div>

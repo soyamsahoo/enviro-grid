@@ -4,6 +4,7 @@ import maplibregl, { type Map as MapLibreMap, type GeoJSONSource } from "maplibr
 import "maplibre-gl/dist/maplibre-gl.css";
 import { cn, formatNumber } from "@/lib/utils";
 import type { AggregatePayload, SpeciesObservation } from "@/lib/types";
+import type { RouteMode } from "@/lib/exposure";
 import { fetchStationsWithLatest, aqiColor } from "@/lib/services/openaq";
 import { fetchJson } from "@/lib/services/http";
 import type { LatLng, RouteResult } from "@/lib/routing";
@@ -59,6 +60,7 @@ export default function RadarMap({
   routeMeta,
   routeLoading,
   onOpenRoutes,
+  routeMode = "fastest",
 }: {
   payload: AggregatePayload | null;
   center: { lat: number; lon: number };
@@ -72,6 +74,7 @@ export default function RadarMap({
   routeMeta?: RouteResult | null;
   routeLoading?: boolean;
   onOpenRoutes?: () => void;
+  routeMode?: RouteMode;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -322,6 +325,17 @@ export default function RadarMap({
 
     map.fitBounds(bounds, { padding: 60, maxZoom: fireCount ? 10 : 11, duration: 700 });
   }, [styleReady, geojson, center]);
+
+  // ------------------------------------ route line color follows route mode
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !styleReady) return;
+    if (!map.getLayer("route-line")) return;
+    const color =
+      routeMode === "cleanest" ? "#34D399" : routeMode === "dangerous" ? "#EF4444" : "#F43F5E";
+    map.setPaintProperty("route-line", "line-color", color);
+    map.setPaintProperty("route-glow", "line-color", color);
+  }, [styleReady, routeMode]);
 
   function applyVisibility(map: MapLibreMap, vis: LayerKey) {
     const set = (id: string, on: boolean) => {
@@ -715,7 +729,14 @@ export default function RadarMap({
           <div className="font-mono text-[10px] uppercase tracking-widest">
             <div className="flex items-center gap-2 text-emerald-300">
               <Route className="h-3 w-3" /> Route A · {formatNumber(routeMeta.distanceKm, 1)} km ·{" "}
-              {Math.round(routeMeta.durationMin)} min
+              {Math.round(routeMeta.durationMin)} min ·{" "}
+              <span
+                style={{
+                  color: routeMode === "cleanest" ? "#34D399" : routeMode === "dangerous" ? "#EF4444" : "#F43F5E",
+                }}
+              >
+                {routeMode}
+              </span>
             </div>
             <div className="mt-0.5 flex items-center gap-2 text-slate-400">
               <span className="h-1.5 w-1.5 rounded-full bg-rose-400" /> PM2.5{" "}

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Bike,
+  Flame,
   Footprints,
   Leaf,
   Loader2,
@@ -16,6 +17,7 @@ import {
   computeRoutes,
   type ActivityId,
   type RouteComparison,
+  type RouteMode,
 } from "@/lib/exposure";
 import type { RouteResult } from "@/lib/routing";
 import type { AggregatePayload } from "@/lib/types";
@@ -28,28 +30,58 @@ const ACTIVITY_ICONS: Record<ActivityId, React.ReactNode> = {
   walker: <Footprints className="h-3.5 w-3.5" />,
 };
 
-function RouteRow({ route, seconds, fastest }: { route: RouteComparison["routeA"]; seconds?: number; fastest?: boolean }) {
+function RouteRow({
+  route,
+  seconds,
+  fastest,
+  highlight,
+  tag,
+}: {
+  route: RouteComparison["routeA"];
+  seconds?: number;
+  fastest?: boolean;
+  highlight?: boolean;
+  tag?: string;
+}) {
   return (
     <div
-      className="relative overflow-hidden rounded-xl border p-4"
-      style={{ borderColor: route.color + "44", background: route.color + "0d" }}
+      className={cn(
+        "relative overflow-hidden rounded-xl border p-4 transition-all",
+        highlight ? "border-2 shadow-[0_0_24px_-8px]" : "border opacity-80",
+      )}
+      style={{
+        borderColor: route.color + "66",
+        background: route.color + "0d",
+        boxShadow: highlight ? `0 0 24px -8px ${route.color}99` : undefined,
+      }}
     >
-      <div
-        className={cn(
-          "absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r",
-          route.accent.bar,
-        )}
-      />
+      <div className={cn("absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r", route.accent.bar)} />
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span
             className="flex h-8 w-8 items-center justify-center rounded-lg"
             style={{ background: route.color + "22", color: route.color }}
           >
-            {route.key === "fastest" ? <Zap className="h-4 w-4" /> : <Leaf className="h-4 w-4" />}
+            {route.key === "fastest" ? (
+              <Zap className="h-4 w-4" />
+            ) : route.key === "dangerous" ? (
+              <Flame className="h-4 w-4" />
+            ) : (
+              <Leaf className="h-4 w-4" />
+            )}
           </span>
           <div>
-            <div className="text-sm font-semibold text-slate-100">{route.label}</div>
+            <div className="flex items-center gap-1.5 text-sm font-semibold text-slate-100">
+              {route.label}
+              {tag && (
+                <span
+                  className="rounded-full border px-1.5 py-px font-mono text-[8px] uppercase tracking-wider"
+                  style={{ color: route.color, borderColor: route.color + "55", background: route.color + "15" }}
+                >
+                  {tag}
+                </span>
+              )}
+            </div>
             <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-slate-500">
               <Timer className="h-3 w-3" />
               {route.minutes} min
@@ -88,6 +120,12 @@ function RouteRow({ route, seconds, fastest }: { route: RouteComparison["routeA"
   );
 }
 
+const MODE_LABEL: Record<RouteMode, string> = {
+  fastest: "Fastest",
+  cleanest: "Cleanest",
+  dangerous: "Dangerous",
+};
+
 export default function RouteDrawer({
   payload,
   persona,
@@ -95,6 +133,7 @@ export default function RouteDrawer({
   onClose,
   routeMeta,
   routeLoading,
+  mode,
 }: {
   payload: AggregatePayload | null;
   persona: PersonaId;
@@ -102,6 +141,7 @@ export default function RouteDrawer({
   onClose: () => void;
   routeMeta?: RouteResult | null;
   routeLoading?: boolean;
+  mode: RouteMode;
 }) {
   const [minutes, setMinutes] = useState(15);
   const [activity, setActivity] = useState<ActivityId>("walker");
@@ -115,8 +155,9 @@ export default function RouteDrawer({
         activityId: activity,
         streetPm25: routeMeta?.avgPm25 ?? undefined,
         minutesA,
+        mode,
       }),
-    [payload, persona, minutes, activity, routeMeta, minutesA],
+    [payload, persona, minutes, activity, routeMeta, minutesA, mode],
   );
 
   useEffect(() => {
@@ -151,7 +192,7 @@ export default function RouteDrawer({
               Route Comparison
             </h2>
             <p className="mt-0.5 font-mono text-[10px] uppercase tracking-widest text-slate-500">
-              Inhaled dose · {persona.replace(/_/g, " ")} · modeled clean corridors
+              {MODE_LABEL[mode]} route · {persona.replace(/_/g, " ")} · modeled corridors
             </p>
           </div>
           <button
@@ -238,31 +279,64 @@ export default function RouteDrawer({
                 </div>
               )}
 
-              <RouteRow route={comparison.routeA} fastest />
+              <RouteRow route={comparison.routeA} fastest highlight={mode === "fastest"} />
+
+              {mode === "dangerous" && comparison.routeD && (
+                <RouteRow
+                  route={comparison.routeD}
+                  highlight
+                  tag="most exposure"
+                />
+              )}
+
               <RouteRow
                 route={comparison.routeB}
                 seconds={comparison.extraMinutes}
+                highlight={mode === "cleanest"}
               />
 
               {/* verdict band */}
-              <div className="flex items-center gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
-                <Leaf className="h-5 w-5 shrink-0 text-emerald-400" />
-                <p className="text-xs leading-relaxed text-emerald-100">
-                  Taking the cleanest route costs{" "}
-                  <b className="text-emerald-300">+{comparison.extraMinutes} min</b> but cuts your
-                  inhaled dose by{" "}
-                  <b className="text-emerald-300">{comparison.exposureReductionPct}%</b> — from{" "}
-                  <b className="text-rose-300">{formatNumber(comparison.routeA.cigarettes, 2)}</b> to{" "}
-                  <b className="text-emerald-300">{formatNumber(comparison.routeB.cigarettes, 2)}</b>{" "}
-                  cigarette equivalents.
-                </p>
-              </div>
+              {mode === "dangerous" && comparison.routeD ? (
+                <div className="flex items-center gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3">
+                  <Flame className="h-5 w-5 shrink-0 text-red-400" />
+                  <p className="text-xs leading-relaxed text-red-100">
+                    The hotspot corridor spikes your inhaled dose to{" "}
+                    <b className="text-red-300">
+                      {formatNumber(comparison.routeD.cigarettes, 2)}
+                    </b>{" "}
+                    cigarette equivalents (+
+                    {Math.round(
+                      ((comparison.routeD.cigarettes - comparison.routeA.cigarettes) /
+                        comparison.routeA.cigarettes) *
+                        100,
+                    )}
+                    % vs fastest) — the{" "}
+                    <b className="text-emerald-300">cleanest route cuts it by{" "}
+                    {comparison.exposureReductionPct}%</b>.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex items-center gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
+                  <Leaf className="h-5 w-5 shrink-0 text-emerald-400" />
+                  <p className="text-xs leading-relaxed text-emerald-100">
+                    Taking the cleanest route costs{" "}
+                    <b className="text-emerald-300">+{comparison.extraMinutes} min</b> but cuts your
+                    inhaled dose by{" "}
+                    <b className="text-emerald-300">{comparison.exposureReductionPct}%</b> — from{" "}
+                    <b className="text-rose-300">{formatNumber(comparison.routeA.cigarettes, 2)}</b>{" "}
+                    to{" "}
+                    <b className="text-emerald-300">{formatNumber(comparison.routeB.cigarettes, 2)}</b>{" "}
+                    cigarette equivalents.
+                  </p>
+                </div>
+              )}
 
               <p className="rounded-xl border border-grid-border bg-grid-panel2 p-3 font-mono text-[10px] leading-relaxed text-slate-500">
                 Dose model: PM2.5 ×{" "}
                 {formatNumber(comparison.ventilation.m3perMin * 1000, 0)} L/min (V̇e,{" "}
                 {comparison.ventilation.label.toLowerCase()}) × minutes / 22 µg per cigarette.
-                Clean corridor factor: {comparison.cleanFactor}× street PM2.5.
+                Clean corridor {comparison.cleanFactor}× · hotspot corridor {comparison.dangerFactor}×
+                street PM2.5.
               </p>
             </>
           )}
