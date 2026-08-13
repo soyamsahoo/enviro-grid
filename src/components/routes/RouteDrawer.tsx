@@ -17,10 +17,9 @@ import {
   type ActivityId,
   type RouteComparison,
 } from "@/lib/exposure";
-import type { RouteResult, LatLng } from "@/lib/routing";
+import type { RouteResult } from "@/lib/routing";
 import type { AggregatePayload } from "@/lib/types";
 import { cn, formatNumber } from "@/lib/utils";
-import RouteForm from "@/components/routes/RouteForm";
 
 const ACTIVITY_ORDER: ActivityId[] = ["runner", "cyclist", "walker"];
 const ACTIVITY_ICONS: Record<ActivityId, React.ReactNode> = {
@@ -96,10 +95,6 @@ export default function RouteDrawer({
   onClose,
   routeMeta,
   routeLoading,
-  origin,
-  destination,
-  onOriginChange,
-  onDestinationChange,
 }: {
   payload: AggregatePayload | null;
   persona: PersonaId;
@@ -107,10 +102,6 @@ export default function RouteDrawer({
   onClose: () => void;
   routeMeta?: RouteResult | null;
   routeLoading?: boolean;
-  origin?: LatLng;
-  destination?: LatLng;
-  onOriginChange?: (p: LatLng) => void;
-  onDestinationChange?: (p: LatLng) => void;
 }) {
   const [minutes, setMinutes] = useState(15);
   const [activity, setActivity] = useState<ActivityId>("walker");
@@ -172,17 +163,6 @@ export default function RouteDrawer({
         </div>
 
         <div className="scrollbar-thin flex-1 space-y-4 overflow-y-auto p-5">
-          {/* From/To route form — change origin or destination and the dose
-              re-integrates along the new OSRM geometry in real time */}
-          {origin && destination && onOriginChange && onDestinationChange && (
-            <RouteForm
-              origin={origin}
-              destination={destination}
-              onOriginChange={onOriginChange}
-              onDestinationChange={onDestinationChange}
-            />
-          )}
-
           {/* Dynamic activity toggle (V̇e in L/min) — recomputes the dose live */}
           <div>
             <div className="mb-1.5 flex items-center justify-between">

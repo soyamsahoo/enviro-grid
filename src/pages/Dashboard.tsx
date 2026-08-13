@@ -498,10 +498,6 @@ export default function Dashboard() {
         onClose={() => setRoutesOpen(false)}
         routeMeta={route}
         routeLoading={routeLoading}
-        origin={origin}
-        destination={destination}
-        onOriginChange={setOrigin}
-        onDestinationChange={setDestination}
       />
       <CopilotChat payload={payload} persona={persona} />
     </div>

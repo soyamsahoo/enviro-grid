@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowUpDown, Loader2, MapPin, Navigation, Search } from "lucide-react";
+import {
+  ArrowRight,
+  ArrowUpDown,
+  Loader2,
+  MapPin,
+  Navigation,
+  Search,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fetchJson } from "@/lib/services/http";
 import type { LatLng } from "@/lib/routing";
@@ -25,20 +32,27 @@ function hitLabel(h: GeoHit): string {
 }
 
 /**
- * From/To route form with geocoded autocomplete. On submit it hands new
- * coordinates to the parent, which re-fetches the OSRM route and re-integrates
- * the inhaled-dose formula live. Dragging the map pins updates the inputs.
+ * From/To route search with geocoded autocomplete.
+ *
+ * variant="overlay" → compact glass bar meant for the map (suggestions open
+ * upward so they never leave the map bounds). variant="drawer" → labelled
+ * fields for side panels. Selecting a place emits new coordinates to the
+ * parent, which re-fetches the OSRM route and re-integrates the dose live.
  */
 export default function RouteForm({
   origin,
   destination,
   onOriginChange,
   onDestinationChange,
+  variant = "drawer",
+  className,
 }: {
   origin: LatLng;
   destination: LatLng;
   onOriginChange: (p: LatLng) => void;
   onDestinationChange: (p: LatLng) => void;
+  variant?: "drawer" | "overlay";
+  className?: string;
 }) {
   const [fromText, setFromText] = useState(coordLabel(origin));
   const [toText, setToText] = useState(coordLabel(destination));
@@ -150,16 +164,16 @@ export default function RouteForm({
   ) => {
     const active = activeField === side;
     return (
-      <div className="relative flex-1">
+      <div className="relative flex-1 min-w-0">
         <div
           className={cn(
-            "flex items-center gap-2 rounded-lg border bg-grid-panel2 px-2.5 py-2 transition-colors",
+            "flex items-center gap-1.5 rounded-lg border bg-grid-panel2 px-2 py-2 transition-colors",
             active
               ? "border-emerald-500/50 shadow-[0_0_14px_-6px_rgba(16,185,129,0.7)]"
               : "border-grid-border",
           )}
         >
-          <span className={cn(side === "from" ? "text-rose-400" : "text-emerald-400")}>
+          <span className={cn("shrink-0", side === "from" ? "text-rose-400" : "text-emerald-400")}>
             {icon}
           </span>
           <input
@@ -172,13 +186,20 @@ export default function RouteForm({
             onBlur={() => window.setTimeout(() => setActiveField((f) => (f === side ? null : f)), 150)}
             onKeyDown={onKeyDown}
             placeholder={placeholder}
-            className="w-full bg-transparent font-mono text-[11px] text-slate-100 outline-none placeholder:text-slate-600"
+            className="w-full min-w-0 bg-transparent font-mono text-[11px] text-slate-100 outline-none placeholder:text-slate-600"
           />
-          {searching && active && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-slate-500" />}
+          {searching && active && (
+            <Loader2 className="h-3 w-3 shrink-0 animate-spin text-slate-500" />
+          )}
         </div>
 
         {active && hits.length > 0 && (
-          <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-lg border border-grid-border bg-grid-panel shadow-2xl">
+          <div
+            className={cn(
+              "absolute z-30 mt-1 w-full overflow-hidden rounded-lg border border-grid-border bg-grid-panel shadow-2xl",
+              variant === "overlay" && "bottom-full mt-0 mb-1",
+            )}
+          >
             {hits.slice(0, 5).map((h) => (
               <button
                 key={h.latitude + "," + h.longitude + h.name}
@@ -205,6 +226,40 @@ export default function RouteForm({
       </div>
     );
   };
+
+  if (variant === "overlay") {
+    return (
+      <div
+        className={cn(
+          "glass flex items-center gap-1.5 rounded-xl px-2 py-1.5 shadow-2xl",
+          className,
+        )}
+      >
+        {field(
+          "from",
+          fromText,
+          setFromText,
+          <MapPin className="h-3.5 w-3.5" />,
+          "From…",
+        )}
+        <ArrowRight className="h-3.5 w-3.5 shrink-0 text-slate-600" />
+        {field(
+          "to",
+          toText,
+          setToText,
+          <Navigation className="h-3.5 w-3.5" />,
+          "To…",
+        )}
+        <button
+          onClick={swap}
+          title="Swap origin and destination"
+          className="flex shrink-0 items-center rounded-md border border-grid-border px-1.5 py-1.5 text-slate-500 transition-colors hover:border-emerald-500/40 hover:text-emerald-300"
+        >
+          <ArrowUpDown className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div>

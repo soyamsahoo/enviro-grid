@@ -7,6 +7,7 @@ import type { AggregatePayload, SpeciesObservation } from "@/lib/types";
 import { fetchStationsWithLatest, aqiColor } from "@/lib/services/openaq";
 import { fetchJson } from "@/lib/services/http";
 import type { LatLng, RouteResult } from "@/lib/routing";
+import RouteForm from "@/components/routes/RouteForm";
 
 interface StationPoint {
   lat: number;
@@ -724,7 +725,19 @@ export default function RadarMap({
           </div>
         ) : null}
       </button>
-      <div className="absolute bottom-3 left-3 rounded-lg border border-grid-border bg-grid-bg/80 p-2.5 backdrop-blur">
+      {/* From/To route search — the hero way to change the route */}
+      {origin && destination && onOriginChange && onDestinationChange && (
+        <div className="absolute bottom-3 left-1/2 z-10 w-[min(94%,560px)] -translate-x-1/2">
+          <RouteForm
+            variant="overlay"
+            origin={origin}
+            destination={destination}
+            onOriginChange={onOriginChange}
+            onDestinationChange={onDestinationChange}
+          />
+        </div>
+      )}
+      <div className="absolute left-3 top-[66px] rounded-lg border border-grid-border bg-grid-bg/80 p-2.5 backdrop-blur">
         <div className="space-y-1 font-mono text-[10px] uppercase tracking-widest text-slate-400">
           <div className="flex items-center gap-2">
             <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> GBIF species
