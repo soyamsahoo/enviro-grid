@@ -345,14 +345,16 @@ export default function Dashboard() {
 
         {/* -------------------------------------------------------- map */}
         <section className="grid gap-4 xl:grid-cols-[1fr_340px]">
-          <RadarMap
-            payload={payload}
-            center={{ lat: location.lat, lon: location.lon }}
-            className="h-[520px]"
-          />
-          <div className="flex flex-col gap-4">
-            <TrendChart payload={payload ?? emptyPayload()} />
+          <div className="flex min-w-0 flex-col gap-4">
+            <RadarMap
+              payload={payload}
+              center={{ lat: location.lat, lon: location.lon }}
+              className="h-[520px]"
+            />
             <DeltaBadges payload={payload ?? emptyPayload()} />
+          </div>
+          <div className="flex min-w-0 flex-col gap-4">
+            <TrendChart payload={payload ?? emptyPayload()} />
             <div className="glass flex-1 rounded-xl p-5">
               <div className="mb-3 flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-slate-500">
                 <Database className="h-3.5 w-3.5" /> Data pipeline
