@@ -1,12 +1,40 @@
 import type { AggregatePayload, PersonaScore, RiskLevel } from "@/lib/types";
 import type { PersonaId } from "./personas";
 import { PERSONA_PROFILES } from "./personas";
-import { buildCopilotPrompt, compactPayload } from "./prompt";
+import { buildChatExtras, buildCopilotPrompt, compactPayload } from "./prompt";
 
 export interface CopilotResult {
   score: PersonaScore;
   fromLLM: boolean;
   provider?: "gemini" | "openai" | "local";
+}
+
+/**
+ * Extra live context the conversational copilot can ground answers in:
+ * route dose modeling (cigarette equivalents), live map route meta, and
+ * triggered alert rules.
+ */
+export interface CopilotChatExtras {
+  routes?: {
+    ventilationLabel: string;
+    activityMinutes: number;
+    mode: string;
+    routeA: { label: string; minutes: number; pm25: number; massUg: number; cigarettes: number };
+    routeB: { label: string; minutes: number; pm25: number; massUg: number; cigarettes: number };
+    routeD?: { label: string; minutes: number; pm25: number; massUg: number; cigarettes: number } | null;
+    exposureReductionPct: number;
+    extraMinutes: number;
+    cleanFactor: number;
+    dangerFactor: number;
+  } | null;
+  routeMeta?: {
+    distanceKm: number;
+    durationMin: number;
+    avgPm25: number | null;
+    from?: { lat: number; lon: number };
+    to?: { lat: number; lon: number };
+  } | null;
+  alerts?: string[];
 }
 
 const RISK_LEVELS: RiskLevel[] = ["Low", "Moderate", "High", "Severe"];
@@ -113,6 +141,7 @@ export async function copilotChat(
   payload: AggregatePayload,
   personaId: PersonaId,
   question: string,
+  extras?: CopilotChatExtras,
 ): Promise<string> {
   const profile = PERSONA_PROFILES[personaId];
   const prompt =
@@ -121,12 +150,22 @@ export async function copilotChat(
     `Rules:\n` +
     `- Only use the measured values in the payload below. If the data cannot answer the question, say so plainly.\n` +
     `- Quote concrete values (e.g. "AQI 63", "PM2.5 at 42 µg/m³", "UV 7") when relevant.\n` +
+    `- You ALSO see route dose modeling (cigarette equivalents), live map route meta and triggered alerts — use them whenever the question touches commuting, journey planning, cigarettes, or personal exposure.\n` +
     `- Give one-line actionable advice tied to the persona.\n` +
     `- Never invent numbers, forecasts, or causal links.\n\n` +
     `PERSONA: ${profile.label}\n` +
     `LOCATION: ${payload.location.name ?? `${payload.location.lat.toFixed(3)}, ${payload.location.lon.toFixed(3)}`}\n` +
-    `LIVE PAYLOAD:\n${JSON.stringify(compactPayload(payload), null, 2)}\n\n` +
-    `USER QUESTION: ${question}`;
+    `LIVE PAYLOAD:\n${JSON.stringify(compactPayload(payload), null, 2)}` +
+    buildChatExtras(
+      extras
+        ? {
+            routes: extras.routes ?? null,
+            routeMeta: extras.routeMeta ?? null,
+            alerts: extras.alerts,
+          }
+        : null,
+    ) +
+    `\n\nUSER QUESTION: ${question}`;
 
   return runLLMText(prompt);
 }

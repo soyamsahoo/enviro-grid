@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Bot, MessageSquare, Send, Sparkles, User, X } from "lucide-react";
 import type { AggregatePayload } from "@/lib/types";
 import type { PersonaId } from "@/lib/ai/personas";
-import { copilotChat } from "@/lib/ai/copilot";
+import { copilotChat, type CopilotChatExtras } from "@/lib/ai/copilot";
 import MarkdownMessage from "./MarkdownMessage";
 import { cn } from "@/lib/utils";
 
@@ -33,9 +33,11 @@ function formatTime(ts: number): string {
 export default function CopilotChat({
   payload,
   persona,
+  context,
 }: {
   payload: AggregatePayload | null;
   persona: PersonaId;
+  context?: CopilotChatExtras;
 }) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -81,7 +83,7 @@ export default function CopilotChat({
     inputRef.current?.style.setProperty("height", "auto");
     setBusy(true);
     try {
-      const answer = await copilotChat(payload, persona, question);
+      const answer = await copilotChat(payload, persona, question, context);
       pushMessage({ role: "assistant", content: answer });
     } catch (err) {
       pushMessage({

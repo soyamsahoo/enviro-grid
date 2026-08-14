@@ -17,7 +17,7 @@ import {
   Zap,
 } from "lucide-react";
 import type { PersonaId } from "@/lib/ai/personas";
-import type { RouteMode } from "@/lib/exposure";
+import { computeRoutes, type RouteMode } from "@/lib/exposure";
 import type { AggregatePayload, AlertRule, SearchLocation } from "@/lib/types";
 import { generatePersonaScore } from "@/lib/ai/copilot";
 import { aggregateEnvironment, recordSearch } from "@/lib/services/apiAggregator";
@@ -219,6 +219,52 @@ export default function Dashboard() {
     () => (payload ? evaluateAlerts(alertRules, payload).filter((s) => s.triggered) : []),
     [alertRules, payload],
   );
+
+  // Route dose context shared with the AI copilot: live map route + the
+  // same dual-route cigarette-equivalent model shown in the drawer.
+  const routeComparison = useMemo(
+    () =>
+      computeRoutes(payload, persona, 15, {
+        activityId: "walker",
+        streetPm25: route?.avgPm25 ?? undefined,
+        minutesA: route ? Math.max(1, Math.round(route.durationMin)) : 15,
+        mode: routeMode,
+      }),
+    [payload, persona, route, routeMode],
+  );
+
+  const chatContext = useMemo(() => {
+    if (!routeComparison && !route && triggeredAlerts.length === 0) return undefined;
+    return {
+      routes: routeComparison
+        ? {
+            ventilationLabel: routeComparison.ventilation.label,
+            activityMinutes: routeComparison.activityMinutes,
+            mode: routeMode,
+            routeA: { ...routeComparison.routeA },
+            routeB: { ...routeComparison.routeB },
+            routeD: routeComparison.routeD ? { ...routeComparison.routeD } : null,
+            exposureReductionPct: routeComparison.exposureReductionPct,
+            extraMinutes: routeComparison.extraMinutes,
+            cleanFactor: routeComparison.cleanFactor,
+            dangerFactor: routeComparison.dangerFactor,
+          }
+        : null,
+      routeMeta: route
+        ? {
+            distanceKm: Math.round(route.distanceKm * 10) / 10,
+            durationMin: Math.round(route.durationMin),
+            avgPm25: route.avgPm25,
+            from: origin,
+            to: destination,
+          }
+        : null,
+      alerts: triggeredAlerts.map(
+        (a) =>
+          `${a.metric} ${a.direction} ${a.threshold}: current value ${a.value}`,
+      ),
+    };
+  }, [routeComparison, route, triggeredAlerts, routeMode, origin, destination]);
 
   useEffect(() => {
     localStorage.setItem("envirogrid.alert_rules.v1", JSON.stringify(alertRules));
@@ -587,7 +633,7 @@ export default function Dashboard() {
         routeLoading={routeLoading}
         mode={routeMode}
       />
-      <CopilotChat payload={payload} persona={persona} />
+      <CopilotChat payload={payload} persona={persona} context={chatContext} />
     </div>
   );
 }
