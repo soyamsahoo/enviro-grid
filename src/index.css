@@ -96,3 +96,48 @@ body {
 .route-pin--dest {
   color: #10b981;
 }
+
+/* Copilot chat — message entrance + typing indicator + panel pop */
+@keyframes chat-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.chat-enter {
+  animation: chat-enter 0.22s ease-out both;
+}
+
+@keyframes typing-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+.typing-dot {
+  animation: typing-bounce 1.2s ease-in-out infinite;
+}
+
+@keyframes chat-pop {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.chat-panel {
+  animation: chat-pop 0.25s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
