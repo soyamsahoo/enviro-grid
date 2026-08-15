@@ -26,7 +26,7 @@ import { avgPm25AlongRoute, fetchRoute, type LatLng, type RouteResult } from "@/
 import { isSupabaseConfigured, checkSupabaseTables } from "@/lib/services/supabase";
 import { reverseGeocode } from "@/components/dashboard/LocationSearch";
 import { cn, timeAgo } from "@/lib/utils";
-import { exportSnapshotCSV, exportSnapshotJSON, exportSnapshotPDF } from "@/lib/export";
+import { exportSnapshot } from "@/lib/export";
 import LocationSearch from "@/components/dashboard/LocationSearch";
 import BreadcrumbNav from "@/components/dashboard/BreadcrumbNav";
 import PersonaSelector from "@/components/dashboard/PersonaSelector";
@@ -57,6 +57,7 @@ export default function Dashboard() {
   const [alertsOpen, setAlertsOpen] = useState(false);
   const [routesOpen, setRoutesOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const [routeMode, setRouteMode] = useState<RouteMode>("fastest");
 
   const [supabaseInfo, setSupabaseInfo] = useState<{
@@ -308,9 +309,25 @@ export default function Dashboard() {
   const handleExport = (format: "json" | "csv" | "pdf") => {
     if (!payload) return;
     const name = location.name || "location";
-    if (format === "json") exportSnapshotJSON(payload, name);
-    else if (format === "csv") exportSnapshotCSV(payload, name);
-    else exportSnapshotPDF(payload, name);
+    exportSnapshot(payload, name, format, {
+      persona,
+      routes: routeComparison
+        ? {
+            ventilationLabel: routeComparison.ventilation.label,
+            activityMinutes: routeComparison.activityMinutes,
+            mode: routeMode,
+            routeA: { ...routeComparison.routeA },
+            routeB: { ...routeComparison.routeB },
+            routeD: routeComparison.routeD ? { ...routeComparison.routeD } : null,
+            exposureReductionPct: routeComparison.exposureReductionPct,
+            extraMinutes: routeComparison.extraMinutes,
+          }
+        : null,
+      routeMeta: route
+        ? { distanceKm: route.distanceKm, durationMin: route.durationMin, avgPm25: route.avgPm25 }
+        : null,
+      alerts: triggeredAlerts.map((a) => `${a.metric} ${a.direction} ${a.threshold}: current value ${a.value}`),
+    });
   };
 
   return (
@@ -445,23 +462,38 @@ export default function Dashboard() {
             </div>
             <div className="relative">
               <button
+                onClick={() => setExportOpen((v) => !v)}
                 className="flex h-9 items-center gap-1.5 rounded-lg border border-grid-border bg-grid-panel2 px-3 text-slate-400 transition-colors hover:text-emerald-300"
                 title="Export snapshot"
               >
                 <Download className="h-4 w-4" />
                 <span className="hidden text-xs sm:inline">Export</span>
               </button>
-              <div className="absolute right-0 top-full z-30 mt-1 hidden w-36 overflow-hidden rounded-lg border border-grid-border bg-grid-panel shadow-xl peer-open:block" onMouseEnter={(e) => (e.currentTarget.style.display = "block")} onMouseLeave={(e) => (e.currentTarget.style.display = "none")}>
-                {(["json", "csv", "pdf"] as const).map((f) => (
-                  <button
-                    key={f}
-                    onClick={() => handleExport(f)}
-                    className="block w-full px-3 py-1.5 text-left font-mono text-[11px] uppercase tracking-wider text-slate-300 hover:bg-secondary"
-                  >
-                    {f === "json" ? "JSON" : f === "csv" ? "CSV" : "PDF"}
-                  </button>
-                ))}
-              </div>
+              {exportOpen && (
+                <>
+                  <div className="fixed inset-0 z-20" onClick={() => setExportOpen(false)} />
+                  <div className="absolute right-0 top-full z-30 mt-1 w-40 overflow-hidden rounded-lg border border-grid-border bg-grid-panel shadow-xl">
+                    <div className="px-3 pb-1 pt-2.5 font-mono text-[9px] uppercase tracking-widest text-slate-500">
+                      Snapshot · {location.name?.split(",")[0] ?? "location"}
+                    </div>
+                    {(["json", "csv", "pdf"] as const).map((f) => (
+                      <button
+                        key={f}
+                        onClick={() => {
+                          handleExport(f);
+                          setExportOpen(false);
+                        }}
+                        className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-medium text-slate-300 transition-colors hover:bg-secondary hover:text-emerald-300"
+                      >
+                        <span>{f === "json" ? "JSON" : f === "csv" ? "CSV" : "PDF"}</span>
+                        <span className="font-mono text-[9px] uppercase tracking-wider text-slate-600">
+                          {f === "json" ? "full report" : f === "csv" ? "spreadsheet" : "report"}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
