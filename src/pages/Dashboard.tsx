@@ -53,6 +53,7 @@ export default function Dashboard() {
   const [location, setLocation] = useState<SearchLocation>(DEFAULT_LOCATION);
   const [persona, setPersona] = useState<PersonaId>("general_citizen");
   const [locating, setLocating] = useState(false);
+  const [locError, setLocError] = useState<string | null>(null);
   const [alertsOpen, setAlertsOpen] = useState(false);
   const [routesOpen, setRoutesOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -159,8 +160,12 @@ export default function Dashboard() {
   }, [origin, destination, gridQuery.data]);
 
   const useCurrentLocation = useCallback(() => {
-    if (!navigator.geolocation) return;
+    if (!("geolocation" in navigator)) {
+      setLocError("Geolocation isn't supported by this browser — search for a city instead.");
+      return;
+    }
     setLocating(true);
+    setLocError(null);
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         const base = {
@@ -184,8 +189,18 @@ export default function Dashboard() {
         );
         setLocating(false);
       },
-      () => setLocating(false),
-      { enableHighAccuracy: true, timeout: 10000 },
+      (err) => {
+        setLocating(false);
+        setLocError(
+          err.code === err.PERMISSION_DENIED
+            ? "Location permission was denied — allow it in your browser address bar, then retry."
+            : err.code === err.TIMEOUT
+              ? "Location lookup timed out — retry, or search for a city instead."
+              : "Couldn't determine your position — retry, or search for a city instead.",
+        );
+      },
+      // Fast, reliable fix: low accuracy + cached fixes beat a 10s high-accuracy hunt.
+      { enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 },
     );
   }, []);
 
@@ -320,10 +335,14 @@ export default function Dashboard() {
 
           <div className="flex flex-wrap items-center gap-2">
             <LocationSearch
-              onSelect={setLocation}
+              onSelect={(loc) => {
+                setLocError(null);
+                setLocation(loc);
+              }}
               onUseCurrent={useCurrentLocation}
               current={location}
               locating={locating}
+              locError={locError}
             />
             <button
               onClick={() => setRoutesOpen(true)}

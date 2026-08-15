@@ -86,11 +86,15 @@ export default function CopilotChat({
       const answer = await copilotChat(payload, persona, question, context);
       pushMessage({ role: "assistant", content: answer });
     } catch (err) {
-      pushMessage({
-        role: "assistant",
-        content: `The AI copilot is unavailable: ${err instanceof Error ? err.message : "unknown error"}. Make sure LLM_API_KEY is set (VITE_LLM_API_KEY in local .env, or LLM_API_KEY on Vercel).`,
-        error: true,
-      });
+      const msg = err instanceof Error ? err.message : "unknown error";
+      const friendly = /429/.test(msg)
+        ? "The AI provider is rate-limited right now (429). Wait a minute and retry, or check your quota."
+        : `The AI copilot is unavailable: ${msg}${
+            /LLM_API_KEY/.test(msg) || /401|403/.test(msg)
+              ? " — check LLM_API_KEY (VITE_LLM_API_KEY in .env, LLM_API_KEY on Vercel)."
+              : ""
+          }`;
+      pushMessage({ role: "assistant", content: friendly, error: true });
     } finally {
       setBusy(false);
     }

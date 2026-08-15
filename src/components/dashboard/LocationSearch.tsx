@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { Search, LocateFixed, Loader2, MapPin, Navigation } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { AlertCircle, Search, LocateFixed, Loader2, MapPin, Navigation } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fetchJson } from "@/lib/services/http";
 import type { SearchLocation } from "@/lib/types";
@@ -53,48 +53,61 @@ export default function LocationSearch({
   onUseCurrent,
   current,
   locating,
+  locError,
 }: {
   onSelect: (loc: SearchLocation) => void;
   onUseCurrent: () => void;
   current: SearchLocation | null;
   locating: boolean;
+  locError?: string | null;
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [results, setResults] = useState<SearchLocation[]>([]);
   const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const debounced = useMemo(() => {
-    let timer: ReturnType<typeof setTimeout>;
-    return (q: string) => {
-      clearTimeout(timer);
+  const runSearch = (q: string) => {
+    setSearching(true);
+    setSearchError(null);
+    fetchJson<{ results?: GeoResult[] }>(GEO_URL.replace("{q}", encodeURIComponent(q)))
+      .then((data) => {
+        const mapped = (data.results ?? [])
+          .filter((r) => r.latitude !== undefined && r.longitude !== undefined)
+          .map((r) => ({
+            lat: r.latitude!,
+            lon: r.longitude!,
+            name: [r.name, r.admin1, r.country].filter(Boolean).join(", "),
+            country: r.country,
+            admin1: r.admin1,
+            city: r.name,
+          }));
+        setResults(mapped);
+        setOpen(mapped.length > 0);
+      })
+      .catch(() => {
+        setResults([]);
+        setOpen(false);
+        setSearchError("Couldn't reach the search service — check your connection and try again.");
+      })
+      .finally(() => setSearching(false));
+  };
+
+  // Stable debounced search accessible from input events and Enter.
+  const debounced = useMemo(
+    () => (q: string) => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
       if (q.trim().length < 2) {
         setResults([]);
         setOpen(false);
+        setSearchError(null);
         return;
       }
-      timer = setTimeout(() => {
-        setSearching(true);
-        fetchJson<{ results?: GeoResult[] }>(GEO_URL.replace("{q}", encodeURIComponent(q)))
-          .then((data) => {
-            const mapped = (data.results ?? [])
-              .filter((r) => r.latitude !== undefined && r.longitude !== undefined)
-              .map((r) => ({
-                lat: r.latitude!,
-                lon: r.longitude!,
-                name: [r.name, r.admin1, r.country].filter(Boolean).join(", "),
-                country: r.country,
-                admin1: r.admin1,
-                city: r.name,
-              }));
-            setResults(mapped);
-            setOpen(true);
-          })
-          .catch(() => setResults([]))
-          .finally(() => setSearching(false));
-      }, 350);
-    };
-  }, []);
+      debounceRef.current = setTimeout(() => runSearch(q), 350);
+    },
+    [],
+  );
 
   return (
     <div className="relative w-full max-w-md">
@@ -107,9 +120,19 @@ export default function LocationSearch({
               setQuery(e.target.value);
               debounced(e.target.value);
             }}
-            onBlur={() => setTimeout(() => setOpen(false), 150)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && results.length > 0) {
+                e.preventDefault();
+                onSelect(results[0]);
+                setQuery(results[0].name);
+                setOpen(false);
+              }
+            }}
+            onBlur={() => setTimeout(() => setOpen(false), 250)}
             onFocus={() => results.length && setOpen(true)}
             placeholder="Search city, region…"
+            autoComplete="off"
+            spellCheck={false}
             className="w-full rounded-lg bg-transparent py-2 pl-9 pr-3 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none"
           />
           {searching && (
@@ -131,6 +154,13 @@ export default function LocationSearch({
         </button>
       </div>
 
+      {(searchError || locError) && (
+        <div className="mt-1.5 flex items-start gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-[11px] leading-snug text-amber-200">
+          <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+          {searchError ?? locError}
+        </div>
+      )}
+
       {current && (
         <div className="mt-1.5 flex items-center gap-1.5 px-2 font-mono text-[11px] text-cyan-300/90">
           <Navigation className="h-3 w-3" />
@@ -138,26 +168,31 @@ export default function LocationSearch({
         </div>
       )}
 
-      {open && results.length > 0 && (
+      {open && (
         <div className="absolute z-30 mt-2 w-full overflow-hidden rounded-xl border border-grid-border bg-grid-panel/95 shadow-2xl backdrop-blur">
-          {results.map((r, i) => (
-            <button
-              key={`${r.lat}-${r.lon}-${i}`}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                onSelect(r);
-                setQuery(r.name);
-                setOpen(false);
-              }}
-              className={cn(
-                "flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-200 transition-colors hover:bg-emerald-500/10 hover:text-emerald-300",
-                i > 0 && "border-t border-grid-border/60",
-              )}
-            >
-              <MapPin className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
-              {r.name}
-            </button>
-          ))}
+          {results.length === 0 && !searching ? (
+            <div className="px-4 py-3 text-sm text-slate-500">No places found for “{query}”.</div>
+          ) : (
+            results.map((r, i) => (
+              <button
+                key={`${r.lat}-${r.lon}-${i}`}
+                type="button"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  onSelect(r);
+                  setQuery(r.name);
+                  setOpen(false);
+                }}
+                className={cn(
+                  "flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-200 transition-colors hover:bg-emerald-500/10 hover:text-emerald-300",
+                  i > 0 && "border-t border-grid-border/60",
+                )}
+              >
+                <MapPin className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
+                <span className="truncate">{r.name}</span>
+              </button>
+            ))
+          )}
         </div>
       )}
     </div>

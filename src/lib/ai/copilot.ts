@@ -2,6 +2,7 @@ import type { AggregatePayload, PersonaScore, RiskLevel } from "@/lib/types";
 import type { PersonaId } from "./personas";
 import { PERSONA_PROFILES } from "./personas";
 import { buildChatExtras, buildCopilotPrompt, compactPayload } from "./prompt";
+import { cigaretteEquivalent, inhaledPm25, VENTILATION_RATES } from "@/lib/exposure";
 
 export interface CopilotResult {
   score: PersonaScore;
@@ -93,7 +94,7 @@ export async function runLLMText(
   const json = opts?.json ?? false;
 
   if (provider === "openai") {
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    const res = await fetchWithRetry("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -106,12 +107,12 @@ export async function runLLMText(
         messages: [{ role: "system", content: prompt }],
       }),
     });
-    if (!res.ok) throw new Error(`OpenAI ${res.status}`);
+    if (!res.ok) throw new Error(describeLLMError("OpenAI", res.status));
     const data = await res.json();
     return data.choices?.[0]?.message?.content ?? "";
   }
 
-  const res = await fetch(`${GEMINI_BASE}/v1beta/interactions`, {
+  const res = await fetchWithRetry(`${GEMINI_BASE}/v1beta/interactions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -126,11 +127,40 @@ export async function runLLMText(
       generation_config: { thinking_level: "low" },
     }),
   });
-  if (!res.ok) throw new Error(`Gemini ${res.status}`);
+  if (!res.ok) throw new Error(describeLLMError("Gemini", res.status));
   const data = await res.json();
   const text = extractInteractionText(data);
   if (!text) throw new Error("Gemini returned no text content");
   return text;
+}
+
+/** Retries transient LLM errors (429 rate-limit / 5xx) with exponential backoff. */
+async function fetchWithRetry(
+  url: string,
+  init: RequestInit,
+  attempts = 3,
+): Promise<Response> {
+  let last: Response | null = null;
+  for (let i = 0; i < attempts; i++) {
+    const res = await fetch(url, init);
+    if (res.status !== 429 && res.status < 500) return res;
+    last = res;
+    if (i < attempts - 1) {
+      await new Promise((r) => setTimeout(r, 1200 * (i + 1)));
+    }
+  }
+  return last!;
+}
+
+/** Human-readable, actionable LLM error message keyed to the HTTP status. */
+function describeLLMError(provider: string, status: number): string {
+  if (status === 429) {
+    return `${provider} 429 — rate limit / quota exceeded. Wait a minute and retry, or check your ${provider} quota.`;
+  }
+  if (status === 401 || status === 403) {
+    return `${provider} ${status} — API key rejected. Check LLM_API_KEY / VITE_LLM_API_KEY.`;
+  }
+  return `${provider} ${status}`;
 }
 
 /**
@@ -167,7 +197,74 @@ export async function copilotChat(
     ) +
     `\n\nUSER QUESTION: ${question}`;
 
-  return runLLMText(prompt);
+  return runLLMText(prompt).catch((err) => {
+    console.warn("[copilot] chat LLM unavailable, using grounded local answer:", err);
+    return localChatAnswer(payload, personaId, question, extras);
+  });
+}
+
+/**
+ * Deterministic, payload-grounded chat answer used when the LLM is
+ * unavailable (no key, rate-limited, or down) so the copilot never dead-ends.
+ * Builds a concise markdown summary from the measured values the model
+ * would otherwise see.
+ */
+function localChatAnswer(
+  payload: AggregatePayload,
+  personaId: PersonaId,
+  question: string,
+  extras?: CopilotChatExtras,
+): string {
+  const profile = PERSONA_PROFILES[personaId];
+  const aq = payload.air_quality;
+  const mc = payload.microclimate;
+  const q = question.toLowerCase();
+  const lines: string[] = [];
+
+  const want = (keys: string[]) => keys.some((k) => q.includes(k));
+  const wantsCigarettes = want(["cigarette", "cigar", "smoke"]);
+  const wantsRoute = want(["route", "commute", "bike", "cycling", "cycle", "run", "drive", "travel", "journey"]);
+
+  if (wantsCigarettes || wantsRoute) {
+    if (extras?.routes) {
+      const r = extras.routes;
+      const row = (o: { label: string; minutes: number; pm25: number; cigarettes: number }) =>
+        `- **${o.label}**: ${o.minutes} min · ${o.pm25} µg/m³ → **${o.cigarettes.toFixed(2)} cigarettes**`;
+      lines.push(
+        `**Route exposure (${r.mode}, ${r.ventilationLabel}, ${r.activityMinutes} min):**`,
+        row(r.routeA),
+        ...(r.routeD ? [row(r.routeD)] : []),
+        row(r.routeB),
+        `The cleanest corridor cuts your dose by **${r.exposureReductionPct}%** for **+${r.extraMinutes} min**. (1 cigarette ≈ 22 µg inhaled PM2.5.)`,
+      );
+    } else if (aq.pm25 !== null) {
+      const vent = VENTILATION_RATES[personaId];
+      const cigs = cigaretteEquivalent(inhaledPm25(aq.pm25, vent.m3perMin, 15));
+      lines.push(`**Inhaled dose estimate:** with ${vent.label.toLowerCase()} (${vent.m3perMin * 1000} L/min) over 15 min at PM2.5 ${aq.pm25} µg/m³ → **${cigs?.toFixed(2) ?? "—"} cigarette equivalents**.`);
+    } else {
+      lines.push("No PM2.5 measurement is available yet, so a dose estimate isn't possible.");
+    }
+  }
+
+  if (lines.length < 2) {
+    const facts: string[] = [];
+    if (aq.aqi !== null) facts.push(`AQI **${aq.aqi}** (${aq.aqi_category})${aq.pm25 !== null ? `, PM2.5 **${aq.pm25} µg/m³**` : ""}`);
+    if (mc.temperature_2m !== null) facts.push(`**${mc.temperature_2m}°C**${mc.apparent_temperature !== null ? ` (feels ${mc.apparent_temperature}°C)` : ""}`);
+    if (mc.relative_humidity_2m !== null) facts.push(`humidity **${mc.relative_humidity_2m}%**`);
+    if (mc.uv_index !== null) facts.push(`UV **${mc.uv_index}**`);
+    if (mc.precipitation_probability !== null) facts.push(`rain **${mc.precipitation_probability}%**`);
+    if (payload.fire_hotspots.length) facts.push(`**${payload.fire_hotspots.length} active fire detection(s)** nearby`);
+    if (payload.biodiversity.length) facts.push(`**${payload.biodiversity.length} species** catalogued nearby`);
+    lines.push(`Current conditions: ${facts.length ? facts.join(" · ") : "no live readings within range yet"}.`);
+  }
+
+  const advice = localScore(payload, personaId).actionable_advice.slice(0, 2);
+  lines.push(`**For your ${profile.label} profile:** ${advice.join(" ")}`);
+
+  return (
+    lines.join("\n\n") +
+    "\n\n> Local analysis — the live LLM is temporarily unavailable (quota or rate limit); this summary is computed from the measured payload."
+  );
 }
 
 /** Reads model output from an Interactions API response (steps timeline). */
