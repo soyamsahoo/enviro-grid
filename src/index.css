@@ -141,3 +141,24 @@ body {
 .chat-panel {
   animation: chat-pop 0.25s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
+
+/*
+ * iOS Safari behaviour fixes:
+ *  - 16px form controls prevent the automatic page zoom on focus
+ *    (Safari zooms into any input/textarea smaller than 16px).
+ *  - 100dvh falls back to 100vh on older iOS versions.
+ */
+input,
+textarea,
+select {
+  font-size: 16px !important;
+}
+
+.chat-panel-height {
+  height: min(600px, calc(100vh - 8rem));
+}
+@supports (height: 100dvh) {
+  .chat-panel-height {
+    height: min(600px, calc(100dvh - 8rem));
+  }
+}

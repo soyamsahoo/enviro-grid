@@ -112,7 +112,7 @@ export default function CopilotChat({
       {/* Floating launcher */}
       <button
         onClick={() => setOpen((o) => !o)}
-        className="fixed bottom-5 right-5 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-300 shadow-2xl backdrop-blur transition-all hover:scale-105 hover:bg-emerald-500/30 active:scale-95 neo-glow-emerald"
+        className="fixed bottom-[max(1.25rem,env(safe-area-inset-bottom))] right-5 z-50 mt-0 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-300 shadow-2xl backdrop-blur transition-all hover:scale-105 hover:bg-emerald-500/30 active:scale-95 neo-glow-emerald"
         title="Ask the AI copilot"
         aria-label="Toggle AI copilot chat"
       >
@@ -127,7 +127,7 @@ export default function CopilotChat({
 
       {/* Chat panel */}
       {open && (
-        <div className="chat-panel fixed bottom-24 right-5 z-50 flex h-[min(600px,calc(100dvh-8rem))] w-[min(400px,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-2xl border border-grid-border bg-grid-panel/95 shadow-2xl backdrop-blur">
+        <div className="chat-panel chat-panel-height fixed bottom-24 right-5 z-50 flex w-[min(400px,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-2xl border border-grid-border bg-grid-panel/95 shadow-2xl backdrop-blur">
           {/* Header */}
           <div className="flex items-center gap-2.5 border-b border-grid-border bg-gradient-to-r from-emerald-500/10 to-cyan-500/10 px-4 py-3">
             <div className="relative flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/15">

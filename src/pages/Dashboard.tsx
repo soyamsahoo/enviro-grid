@@ -24,6 +24,7 @@ import { aggregateEnvironment, recordSearch } from "@/lib/services/apiAggregator
 import { fetchAqiGrid } from "@/lib/services/openaq";
 import { avgPm25AlongRoute, fetchRoute, type LatLng, type RouteResult } from "@/lib/routing";
 import { isSupabaseConfigured, checkSupabaseTables } from "@/lib/services/supabase";
+import { requestPosition } from "@/lib/geo";
 import { reverseGeocode } from "@/components/dashboard/LocationSearch";
 import { cn, timeAgo } from "@/lib/utils";
 import { exportSnapshot } from "@/lib/export";
@@ -160,49 +161,39 @@ export default function Dashboard() {
     };
   }, [origin, destination, gridQuery.data]);
 
-  const useCurrentLocation = useCallback(() => {
+  const useCurrentLocation = useCallback(async () => {
     if (!("geolocation" in navigator)) {
       setLocError("Geolocation isn't supported by this browser — search for a city instead.");
       return;
     }
     setLocating(true);
     setLocError(null);
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const base = {
-          lat: pos.coords.latitude,
-          lon: pos.coords.longitude,
-          name: "My location",
-        } as SearchLocation;
-        const geo = await reverseGeocode(base.lat, base.lon).catch(() => null);
-        const g = geo as Partial<SearchLocation> | null;
-        setLocation(
-          g && (g.country || g.city || g.locality)
-            ? {
-                ...base,
-                name: [g.city, g.admin1, g.country].filter(Boolean).join(", ") || base.name,
-                country: g.country,
-                admin1: g.admin1,
-                city: g.city,
-                locality: g.locality,
-              }
-            : base,
-        );
-        setLocating(false);
-      },
-      (err) => {
-        setLocating(false);
-        setLocError(
-          err.code === err.PERMISSION_DENIED
-            ? "Location permission was denied — allow it in your browser address bar, then retry."
-            : err.code === err.TIMEOUT
-              ? "Location lookup timed out — retry, or search for a city instead."
-              : "Couldn't determine your position — retry, or search for a city instead.",
-        );
-      },
-      // Fast, reliable fix: low accuracy + cached fixes beat a 10s high-accuracy hunt.
-      { enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 },
+    const result = await requestPosition();
+    if (result.status !== "ok") {
+      setLocating(false);
+      setLocError(result.message);
+      return;
+    }
+    const base = {
+      lat: result.lat,
+      lon: result.lon,
+      name: "My location",
+    } as SearchLocation;
+    const geo = await reverseGeocode(result.lat, result.lon).catch(() => null);
+    const g = geo as Partial<SearchLocation> | null;
+    setLocation(
+      g && (g.country || g.city || g.locality)
+        ? {
+            ...base,
+            name: [g.city, g.admin1, g.country].filter(Boolean).join(", ") || base.name,
+            country: g.country,
+            admin1: g.admin1,
+            city: g.city,
+            locality: g.locality,
+          }
+        : base,
     );
+    setLocating(false);
   }, []);
 
   const loading = envQuery.isLoading;
